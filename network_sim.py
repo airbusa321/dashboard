@@ -9,7 +9,14 @@ st.title("🛫 Spirit Airlines Network Planning Dashboard")
 file_path = "root_data.xlsx"
 
 try:
-    df = pd.read_excel(file_path, sheet_name="Base")
+    # Check available sheet names
+    xlsx = pd.ExcelFile(file_path)
+    if "NET_in" not in xlsx.sheet_names:
+        st.error(f"'NET_in' sheet not found. Available sheets: {xlsx.sheet_names}")
+        st.stop()
+
+    # Load the correct sheet
+    df = pd.read_excel(xlsx, sheet_name="NET_in")
     df.columns = [str(c).strip() for c in df.columns]
 
     # Ensure relevant columns are numeric
@@ -101,4 +108,4 @@ try:
     st.download_button("Download CSV", selected.to_csv(index=False), "selected_routes.csv")
 
 except Exception as e:
-    st.error("Failed to load data from root_data.xlsx: {}".format(e)) 
+    st.error(f"Failed to load or process data from root_data.xlsx: {e}")
