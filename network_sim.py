@@ -40,11 +40,16 @@ try:
     id_fields = ["AF", "Departure Airport", "Arrival Airport", "Hub (nested)"]
     numeric_fields = [
         "Constrained Segment Revenue", "Constrained Yield (cent, km)", "Constrained RASK (cent)",
-        "Distance (mi)", "Seats", "Constrained Segment Pax"
+        "Distance (mi)", "Seats", "Constrained Segment Pax", "ASM", "RPM", "Load Factor",
+        "RASM", "RASK (¢/mi)", "Raw Yield (¢/mi)", "Normalized Yield (¢/mi)"
     ]
 
     df_grouped = df_raw.groupby(id_fields, as_index=False)[numeric_fields].sum()
     df = df_grouped.merge(flight_freq, on="AF", how="left")
+
+    # ensure NetworkType is defined before grouping
+    df["Route"] = df["Departure Airport"] + "-" + df["Arrival Airport"]
+    df["NetworkType"] = df["Hub (nested)"].apply(lambda h: h.strip() if h.strip() in ["FLL", "LAS", "DTW", "MCO"] else "P2P")
 
     market_summary = df.groupby("NetworkType").agg(
         Weekly_Departures=("AF", "nunique"),
@@ -123,7 +128,7 @@ try:
     col3.metric("Avg Yield", f"{avg_yield:.2f}¢/mi")
 
     st.markdown("---")
-    tab1, tab2 = st.tabs(["Route Table + Summary", "Top 15 by Usefulness"])
+    tab1, tab2 = st.tabs(["Route Table + Market Summary", "Top 15 by Usefulness"])
 
     with tab1:
         st.subheader(f"📈 Filtered Routes for {hub_filter} — {selected_scenario}")
@@ -141,23 +146,7 @@ try:
         st.subheader("🔹 Top 15 Routes")
         st.dataframe(selected.sort_values("Usefulness", ascending=False)[["AF", "Route", "ASM", "RASM", "Usefulness"]].head(15), use_container_width=True)
 
-    with tab3:
-        st.subheader("📊 Market Summary")
-        summary_df = df.groupby("NetworkType").agg(
-            Weekly_Departures=("AF", "nunique"),
-            ASMs_Million=("ASM", lambda x: round(x.sum() / 1_000_000, 1)),
-            LF=("Load Factor", "mean"),
-            AvgRevPerPax=("Constrained Segment Revenue", "sum"),
-            Yield_constr=("Raw Yield (¢/mi)", "mean"),
-            Yield_unc=("Normalized Yield (¢/mi)", "mean"),
-            SLA_RASM=("RASM", "mean"),
-            RASM_constr=("RASM", "mean"),
-            RASM_unc=("RASK (¢/mi)", "mean"),
-            CASM_variable=("RASK (¢/mi)", "mean"),
-            CASM_ex_own=("RASK (¢/mi)", "mean"),
-            CASM_pretax=("RASK (¢/mi)", "mean")
-        ).reset_index()
-        st.dataframe(summary_df, use_container_width=True)
+    
 
     st.markdown("---")
     st.download_button("Download CSV", df_sorted.to_csv(index=False), "filtered_routes.csv")
