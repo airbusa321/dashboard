@@ -8,6 +8,7 @@ st.title("🛫 Spirit Airlines Network Planning Dashboard")
 file_path = "root_data.xlsx"
 
 try:
+    # Load and clean
     xlsx = pd.ExcelFile(file_path)
     if "NET_in" not in xlsx.sheet_names:
         st.error(f"'NET_in' sheet not found. Available sheets: {xlsx.sheet_names}")
@@ -16,15 +17,20 @@ try:
     df_raw = pd.read_excel(xlsx, sheet_name="NET_in")
     df_raw.columns = [str(c).strip() for c in df_raw.columns]
 
-    # Count days each flight operates
-    if "AF" in df_raw.columns and "Day of Week" in df_raw.columns:
-        flight_freq = df_raw.groupby("AF")["Day of Week"].nunique().reset_index()
-        flight_freq.columns = ["AF", "Days Operated"]
-    else:
-        st.error("Missing required columns: 'AF' and 'Day of Week'")
-        st.stop()
+    # Rename columns to standard names used in logic
+    df_raw.rename(columns={
+        "Flight Number": "AF",
+        "Departure Day": "Day of Week",
+        "Departure Airport": "Departure Airport",
+        "Arrival Airport": "Arrival Airport",
+        "Hub (nested)": "Hub (nested)"
+    }, inplace=True)
 
-    # Aggregate metrics by flight number
+    # Count operating days per flight number
+    flight_freq = df_raw.groupby("AF")["Day of Week"].nunique().reset_index()
+    flight_freq.columns = ["AF", "Days Operated"]
+
+    # Define columns to group by and sum
     id_fields = ["AF", "Departure Airport", "Arrival Airport", "Hub (nested)"]
     numeric_fields = [
         "ASM", "Constrained Segment Revenue", "Constrained Yield (cent, km)",
@@ -34,10 +40,11 @@ try:
         "Unconstrained Segment Revenue", "Unconstrained RPK"
     ]
 
+    # Group by flight number
     df_grouped = df_raw.groupby(id_fields, as_index=False)[numeric_fields].sum()
     df = df_grouped.merge(flight_freq, on="AF", how="left")
 
-    # Route, NetworkType, Elasticity, Usefulness
+    # Derived fields
     df["Route"] = df["Departure Airport"] + "-" + df["Arrival Airport"]
     df["NetworkType"] = df.apply(
         lambda row: row["Hub (nested)"].strip() if row["Hub (nested)"].strip() in ["FLL", "LAS", "DTW", "MCO"] else "P2P",
