@@ -85,22 +85,22 @@ try:
 
     def compute_market_summary(df):
         result = []
-    for name, group in df.groupby("NetworkType"):
-        asm = group["ASM"].sum()
-        revenue = group["Constrained Segment Revenue"].sum()
-        sl = group["Distance (mi)"].mean()
-        sla_trasm = np.average(group["Normalized Yield (¢/mi)"], weights=group["ASM"]) if asm > 0 else 0
-        result.append({
-            "NetworkType": name,
-            "Revenue": revenue,
-            "ASMs": asm,
-            "SL": sl,
-            "TRASM": (revenue / asm) * 100 if asm > 0 else 0,
-            "SLA_TRASM": sla_trasm,
-            "Seats": group["Seats"].sum(),
-            "Deps": group["Days Operated"].sum()
-        })
-    return pd.DataFrame(result)
+        for name, group in df.groupby("NetworkType"):
+            asm = group["ASM"].sum()
+            revenue = group["Constrained Segment Revenue"].sum()
+            sl = group["Distance (mi)"].mean()
+            sla_trasm = np.average(group["Normalized Yield (¢/mi)"], weights=group["ASM"]) if asm > 0 else 0
+            result.append({
+                "NetworkType": name,
+                "Revenue": revenue,
+                "ASMs": asm,
+                "SL": sl,
+                "TRASM": (revenue / asm) * 100 if asm > 0 else 0,
+                "SLA_TRASM": sla_trasm,
+                "Seats": group["Seats"].sum(),
+                "Deps": group["Days Operated"].sum()
+            })
+        return pd.DataFrame(result)
 
     market_summary = compute_market_summary(df)
 
