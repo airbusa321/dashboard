@@ -32,12 +32,46 @@ try:
         "Cut": "Cut"
     }, inplace=True)
 
+    # ✅ Load Pavlina Assumptions from root_2.xls and append as new scenario
+    pavlina_path = "root_2.xls"
+    try:
+        df_pav = pd.read_excel(pavlina_path)
+        df_pav.columns = [str(c).strip() for c in df_pav.columns]
+
+        df_pav["Departure Airport"] = df_pav["O"].astype(str).str.strip()
+        df_pav["Arrival Airport"] = df_pav["D"].astype(str).str.strip()
+        df_pav["AF"] = df_pav["Departure Airport"] + df_pav["Arrival Airport"]
+        df_pav["AF"] = df_pav["AF"].astype(str)
+        df_pav["ScenarioLabel"] = "Pavlina Assumptions"
+
+        df_pav["Distance (mi)"] = df_pav["SL"]
+        df_pav["ASM"] = df_pav["Added ASMs"]
+        df_pav["Unconstrained O&D Revenue"] = df_pav["Added ASMs * TRASM"]
+        df_pav["Constrained Segment Revenue"] = 0
+        df_pav["Constrained Segment Pax"] = 0
+        df_pav["Seats"] = 0
+        df_pav["Cut"] = 0
+        df_pav["Day of Week"] = 1
+        df_pav["Hub (nested)"] = "P2P"
+        df_pav["Spill Rate"] = 1.0
+
+        needed_cols = df_raw.columns
+        for col in needed_cols:
+            if col not in df_pav.columns:
+                df_pav[col] = np.nan
+        df_pav = df_pav[needed_cols]
+
+        df_raw = pd.concat([df_raw, df_pav], ignore_index=True)
+
+    except Exception as e:
+        st.warning(f"⚠️ Failed to load or process Pavlina file (root_2.xls): {e}")
+
     df_raw["Distance (mi)"] = df_raw["Distance (mi)"]
     df_raw["ASM"] = df_raw["Seats"] * df_raw["Distance (mi)"]
     df_raw["AF"] = df_raw["AF"].astype(str)
 
     df_raw["NetworkType"] = df_raw["Hub (nested)"].apply(
-        lambda h: h.strip() if h.strip() in ["FLL", "LAS", "DTW", "MCO"] else "P2P"
+        lambda h: h.strip() if str(h).strip() in ["FLL", "LAS", "DTW", "MCO"] else "P2P"
     )
 
     days_op = df_raw.groupby(["ScenarioLabel", "AF"])["Day of Week"].nunique().clip(upper=7).reset_index()
@@ -48,7 +82,7 @@ try:
 
     df_raw["Raw Yield (¢/mi)"] = df_raw["Constrained Yield (cent, km)"] * 1.60934
     log_lengths = np.log(df_raw["Distance (mi)"] + 1)
-    coeffs = np.polyfit(log_lengths, df_raw["Raw Yield (¢/mi)"], 1)
+    coeffs = np.polyfit(log_lengths.dropna(), df_raw.loc[log_lengths.notna(), "Raw Yield (¢/mi)"], 1)
     df_raw["Normalized Yield (¢/mi)"] = coeffs[0] * log_lengths + coeffs[1]
 
     df_raw["RPM"] = df_raw["Constrained Segment Pax"] * df_raw["Distance (mi)"]
@@ -69,8 +103,6 @@ try:
     mean_rasm = df_raw["RASM"].mean()
     mean_trasm = df_raw["TRASM"].mean()
 
-    # Usefulness Score based on "The Global Airline Industry" (Belobaba et al.):
-    # SL-normalized Yield, Load Factor, RASM, TRASM, adjusted for Elasticity and Spill Rate.
     df_raw["Raw Usefulness"] = (
         ((df_raw["Normalized Yield (¢/mi)"] - mean_yield) / std_yield +
          df_raw["Load Factor"] / mean_lf +
@@ -88,14 +120,6 @@ try:
     - **Load Factor** (relative to system mean)
     - **RASM** and **TRASM** (as profitability and revenue indicators)
     - Adjusted for **Elasticity** and **Spill Rate**
-    
-    Formula:
-    ```
-    Usefulness = 
-        [ (NormYield_z + LF_ratio + RASM_ratio + TRASM_ratio) / 4 ] 
-        × Elasticity × (1 + 0.1 × Spill Rate)
-    ```
-    Based on methods from *The Global Airline Industry* (Belobaba, Odoni, Barnhart).
     """)
 
     tab1, tab2 = st.tabs(["📊 Summary View", "🔍 Route Analysis"])
@@ -121,31 +145,6 @@ try:
 
         st.dataframe(system_summary, use_container_width=True)
 
-        st.subheader("✅ Validation Check")
-        expected_values = {
-            "Base 0604": (4672, 800.8747057103944),
-            "Summer1 (sink or swim) + more new P2P markets for evaluation": (6488, 1217.628006331203),
-            "Summer1 0610 refinements": (3246, 538.2629848260777)
-        }
-
-        validation_results = []
-        for scenario, (exp_deps, exp_asms) in expected_values.items():
-            actual_row = system_summary[system_summary["Scenario"] == scenario]
-            if not actual_row.empty:
-                actual_deps = actual_row["Weekly Departures"].values[0]
-                actual_asms = actual_row["ASMs (M)"].values[0]
-                check = "✅" if abs(actual_deps - exp_deps) < 5 and abs(actual_asms - exp_asms) < 1 else "❌"
-                validation_results.append({
-                    "Scenario": scenario,
-                    "Expected Deps": exp_deps,
-                    "Actual Deps": actual_deps,
-                    "Expected ASMs (M)": exp_asms,
-                    "Actual ASMs (M)": actual_asms,
-                    "Validation": check
-                })
-
-        st.dataframe(pd.DataFrame(validation_results))
-
     with tab2:
         st.header("✈️ Route-Level Hub Analysis")
         scenario_choice = st.selectbox("Select Scenario", df_raw["ScenarioLabel"].unique(), key="route_scenario")
@@ -166,4 +165,4 @@ try:
         ]], use_container_width=True)
 
 except Exception as e:
-    st.error(f"Failed to load or process data from root_data.xlsx: {e}")
+    st.error(f"Failed to load or process data: {e}")
