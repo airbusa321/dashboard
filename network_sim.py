@@ -33,7 +33,7 @@ try:
     }, inplace=True)
 
     # ✅ Load Pavlina Assumptions from root_2.xls and append as new scenario
-    pavlina_path = "root_2.xls"
+    pavlina_path = "root_2.xlsx"
     try:
         df_pav = pd.read_excel(pavlina_path)
         df_pav.columns = [str(c).strip() for c in df_pav.columns]
