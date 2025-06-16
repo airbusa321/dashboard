@@ -84,7 +84,7 @@ try:
     df["Usefulness"] = df["Raw Usefulness"] - min_score if min_score < 0 else df["Raw Usefulness"]
 
     def compute_market_summary(df):
-    result = []
+        result = []
     for name, group in df.groupby("NetworkType"):
         asm = group["ASM"].sum()
         revenue = group["Constrained Segment Revenue"].sum()
