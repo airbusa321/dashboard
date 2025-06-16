@@ -27,7 +27,8 @@ try:
         "Dist mi": "Distance (mi)",
         "Constrained Segment Pax": "Constrained Segment Pax",
         "Constrained Segment Revenue": "Constrained Segment Revenue",
-        "ScenarioLabel": "ScenarioLabel"
+        "ScenarioLabel": "ScenarioLabel",
+        "Cut": "Cut"
     }, inplace=True)
 
     df_raw["Distance (mi)"] = df_raw["Distance (mi)"]
@@ -38,27 +39,100 @@ try:
         lambda h: h.strip() if h.strip() in ["FLL", "LAS", "DTW", "MCO"] else "P2P"
     )
 
-    scenario_options = df_raw["ScenarioLabel"].dropna().unique().tolist()
-    selected_scenario = st.sidebar.selectbox("Scenario", scenario_options)
+    # Usefulness calculation based on Belobaba-style methodology
+    df_raw["Raw Yield (¢/mi)"] = df_raw["Constrained Yield (cent, km)"] * 1.60934
+    log_lengths = np.log(df_raw["Distance (mi)"] + 1)
+    coeffs = np.polyfit(log_lengths, df_raw["Raw Yield (¢/mi)"], 1)
+    df_raw["Normalized Yield (¢/mi)"] = coeffs[0] * log_lengths + coeffs[1]
 
-    df_filtered = df_raw[df_raw["ScenarioLabel"] == selected_scenario].copy()
+    df_raw["RPM"] = df_raw["Constrained Segment Pax"] * df_raw["Distance (mi)"]
+    df_raw["Load Factor"] = df_raw["RPM"] / df_raw["ASM"] * 100
+    df_raw["RASM"] = df_raw["Constrained Segment Revenue"] / df_raw["ASM"] * 100
 
-    st.subheader(f"📊 Summary by Hub — {selected_scenario}")
-    hub_summary = df_filtered.groupby("NetworkType").apply(lambda g: pd.Series({
-        "Weekly Departures": g.shape[0],
-        "ASMs (M)": g["ASM"].sum() / 1_000_000
-    })).reset_index().rename(columns={"NetworkType": "Hub"})
+    df_raw["Elasticity"] = df_raw.apply(
+        lambda row: 1.2 if row["Constrained Segment Pax"] > 1.1 * row["Seats"] * 0.7 else 1.0,
+        axis=1
+    )
 
-    st.dataframe(hub_summary, use_container_width=True)
+    mean_yield = df_raw["Normalized Yield (¢/mi)"].mean()
+    std_yield = df_raw["Normalized Yield (¢/mi)"].std()
+    mean_lf = df_raw["Load Factor"].mean()
+    mean_rasm = df_raw["RASM"].mean()
 
-    st.subheader("📊 System-Level Summary")
-    system_summary = df_raw.groupby("ScenarioLabel").apply(lambda g: pd.Series({
-        "Weekly Departures": g.shape[0],
-        "ASMs (M)": g["ASM"].sum() / 1_000_000
-    })).reset_index()
+    df_raw["Raw Usefulness"] = (
+        ((df_raw["Normalized Yield (¢/mi)"] - mean_yield) / std_yield) *
+        (df_raw["Load Factor"] / mean_lf) *
+        (df_raw["RASM"] / mean_rasm) *
+        (1 + 0.1) *
+        df_raw["Elasticity"]
+    )
 
-    system_summary = system_summary.rename(columns={"ScenarioLabel": "Scenario"})
-    st.dataframe(system_summary, use_container_width=True)
+    min_score = df_raw["Raw Usefulness"].min()
+    df_raw["Usefulness"] = df_raw["Raw Usefulness"] - min_score if min_score < 0 else df_raw["Raw Usefulness"]
+
+    # Tabs for Overview and Route Analysis
+    tab1, tab2 = st.tabs(["📊 Summary View", "🔍 Route Analysis"])
+
+    with tab1:
+        scenario_options = df_raw["ScenarioLabel"].dropna().unique().tolist()
+        selected_scenario = st.selectbox("Scenario", scenario_options, key="summary_scenario")
+        df_filtered = df_raw[df_raw["ScenarioLabel"] == selected_scenario].copy()
+
+        st.subheader(f"📊 Summary by Hub — {selected_scenario}")
+        hub_summary = df_filtered.groupby("NetworkType").apply(lambda g: pd.Series({
+            "Weekly Departures": g.shape[0],
+            "ASMs (M)": g["ASM"].sum() / 1_000_000
+        })).reset_index().rename(columns={"NetworkType": "Hub"})
+
+        st.dataframe(hub_summary, use_container_width=True)
+
+        st.subheader("📊 System-Level Summary")
+        system_summary = df_raw.groupby("ScenarioLabel").apply(lambda g: pd.Series({
+            "Weekly Departures": g.shape[0],
+            "ASMs (M)": g["ASM"].sum() / 1_000_000
+        })).reset_index().rename(columns={"ScenarioLabel": "Scenario"})
+
+        st.dataframe(system_summary, use_container_width=True)
+
+        st.subheader("✅ Validation Check")
+        expected_values = {
+            "Base 0604": (4672, 800.8747057103944),
+            "Summer1 (sink or swim) + more new P2P markets for evaluation": (6488, 1217.628006331203),
+            "Summer1 0610 refinements": (3246, 538.2629848260777)
+        }
+
+        validation_results = []
+        for scenario, (exp_deps, exp_asms) in expected_values.items():
+            actual_row = system_summary[system_summary["Scenario"] == scenario]
+            if not actual_row.empty:
+                actual_deps = actual_row["Weekly Departures"].values[0]
+                actual_asms = actual_row["ASMs (M)"].values[0]
+                check = "✅" if abs(actual_deps - exp_deps) < 5 and abs(actual_asms - exp_asms) < 1 else "❌"
+                validation_results.append({
+                    "Scenario": scenario,
+                    "Expected Deps": exp_deps,
+                    "Actual Deps": actual_deps,
+                    "Expected ASMs (M)": exp_asms,
+                    "Actual ASMs (M)": actual_asms,
+                    "Validation": check
+                })
+
+        st.dataframe(pd.DataFrame(validation_results))
+
+    with tab2:
+        st.header("✈️ Route-Level Hub Analysis")
+        scenario_choice = st.selectbox("Select Scenario", df_raw["ScenarioLabel"].unique(), key="route_scenario")
+        hub_choice = st.selectbox("Select Hub", ["DTW", "LAS", "FLL", "MCO", "P2P"], key="route_hub")
+        show_only_cut = st.checkbox("Show only cut routes")
+
+        df_view = df_raw[(df_raw["ScenarioLabel"] == scenario_choice) & (df_raw["NetworkType"] == hub_choice)].copy()
+        if show_only_cut:
+            df_view = df_view[df_view["Cut"] == 1]
+
+        df_view = df_view.sort_values("Usefulness", ascending=False)
+        st.dataframe(df_view[[
+            "AF", "Departure Airport", "Arrival Airport", "ASM", "RASM", "Load Factor", "Usefulness", "Cut"
+        ]], use_container_width=True)
 
 except Exception as e:
     st.error(f"Failed to load or process data from root_data.xlsx: {e}")
