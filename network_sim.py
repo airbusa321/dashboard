@@ -46,20 +46,6 @@ try:
     df_grouped = df_raw.groupby(id_fields, as_index=False)[numeric_fields].sum()
     df = df_grouped.merge(flight_freq, on="AF", how="left")
 
-    # ensure NetworkType is defined before grouping
-    df["Route"] = df["Departure Airport"] + "-" + df["Arrival Airport"]
-    df["NetworkType"] = df["Hub (nested)"].apply(lambda h: h.strip() if h.strip() in ["FLL", "LAS", "DTW", "MCO"] else "P2P")
-
-    market_summary = df.groupby("NetworkType").agg(
-        Revenue=("Constrained Segment Revenue", "sum"),
-        ASMs=("ASM", "sum"),
-        SL=("Distance (mi)", "mean"),
-        TRASM=("ASM", lambda asm: (df.loc[asm.index, "Constrained Segment Revenue"].sum() / asm.sum()) * 100),
-        SLA_TRASM=("ASM", lambda asm: (df.loc[asm.index, "Normalized Yield (¢/mi)"].mul(asm).sum() / asm.sum())),
-        Seats=("Seats", "sum"),
-        Deps=("Days Operated", "sum")
-    ).reset_index()
-
     df["Route"] = df["Departure Airport"] + "-" + df["Arrival Airport"]
     df["NetworkType"] = df["Hub (nested)"].apply(lambda h: h.strip() if h.strip() in ["FLL", "LAS", "DTW", "MCO"] else "P2P")
 
@@ -96,6 +82,27 @@ try:
 
     min_score = df["Raw Usefulness"].min()
     df["Usefulness"] = df["Raw Usefulness"] - min_score if min_score < 0 else df["Raw Usefulness"]
+
+    def compute_market_summary(df):
+    result = []
+    for name, group in df.groupby("NetworkType"):
+        asm = group["ASM"].sum()
+        revenue = group["Constrained Segment Revenue"].sum()
+        sl = group["Distance (mi)"].mean()
+        sla_trasm = np.average(group["Normalized Yield (¢/mi)"], weights=group["ASM"]) if asm > 0 else 0
+        result.append({
+            "NetworkType": name,
+            "Revenue": revenue,
+            "ASMs": asm,
+            "SL": sl,
+            "TRASM": (revenue / asm) * 100 if asm > 0 else 0,
+            "SLA_TRASM": sla_trasm,
+            "Seats": group["Seats"].sum(),
+            "Deps": group["Days Operated"].sum()
+        })
+    return pd.DataFrame(result)
+
+    market_summary = compute_market_summary(df)
 
     st.sidebar.header("🛫 Strategic Inputs")
     hub_filter = st.sidebar.selectbox("Hub Focus", ["Full Network", "DTW", "MCO", "LAS", "FLL", "P2P"])
@@ -139,8 +146,6 @@ try:
     with tab2:
         st.subheader("🔹 Top 15 Routes")
         st.dataframe(selected.sort_values("Usefulness", ascending=False)[["AF", "Route", "ASM", "RASM", "Usefulness"]].head(15), use_container_width=True)
-
-    
 
     st.markdown("---")
     st.download_button("Download CSV", df_sorted.to_csv(index=False), "filtered_routes.csv")
