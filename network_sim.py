@@ -160,7 +160,9 @@ try:
         df_view = df_view.sort_values("Usefulness", ascending=False)
         st.dataframe(df_view[[
             "AF", "Departure Airport", "Arrival Airport", "ASM", "RASM", "TRASM", "Load Factor",
-            "Unconstrained O&D Revenue", "Usefulness", "Cut", "Days Operated"
+            "Raw Yield (¢/mi)", "Normalized Yield (¢/mi)",
+            "Constrained Segment Revenue", "Unconstrained O&D Revenue",
+            "Usefulness", "Cut", "Days Operated"
         ]], use_container_width=True)
 
 except Exception as e:
