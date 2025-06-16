@@ -27,6 +27,7 @@ try:
         "Dist mi": "Distance (mi)",
         "Constrained Segment Pax": "Constrained Segment Pax",
         "Constrained Segment Revenue": "Constrained Segment Revenue",
+        "Unconstrained O&D Revenue": "Unconstrained O&D Revenue",
         "ScenarioLabel": "ScenarioLabel",
         "Cut": "Cut"
     }, inplace=True)
@@ -53,6 +54,9 @@ try:
     df_raw["RPM"] = df_raw["Constrained Segment Pax"] * df_raw["Distance (mi)"]
     df_raw["Load Factor"] = df_raw["RPM"] / df_raw["ASM"] * 100
     df_raw["RASM"] = df_raw["Constrained Segment Revenue"] / df_raw["ASM"] * 100
+    df_raw["TRASM"] = df_raw["Unconstrained O&D Revenue"] / df_raw["ASM"] * 100
+
+    df_raw["Spill Rate"] = df_raw["Spill Rate"] if "Spill Rate" in df_raw.columns else 1.0
 
     df_raw["Elasticity"] = df_raw.apply(
         lambda row: 1.2 if row["Constrained Segment Pax"] > 1.1 * row["Seats"] * 0.7 else 1.0,
@@ -63,16 +67,36 @@ try:
     std_yield = df_raw["Normalized Yield (¢/mi)"].std()
     mean_lf = df_raw["Load Factor"].mean()
     mean_rasm = df_raw["RASM"].mean()
+    mean_trasm = df_raw["TRASM"].mean()
 
-    # Belobaba-style SL-adjusted usefulness
+    # Usefulness Score based on "The Global Airline Industry" (Belobaba et al.):
+    # SL-normalized Yield, Load Factor, RASM, TRASM, adjusted for Elasticity and Spill Rate.
     df_raw["Raw Usefulness"] = (
-        ((df_raw["Normalized Yield (¢/mi)"] - mean_yield) / std_yield) +
-        (df_raw["Load Factor"] / mean_lf) +
-        (df_raw["RASM"] / mean_rasm)
-    ) / 3 * df_raw["Elasticity"]
+        ((df_raw["Normalized Yield (¢/mi)"] - mean_yield) / std_yield +
+         df_raw["Load Factor"] / mean_lf +
+         df_raw["RASM"] / mean_rasm +
+         df_raw["TRASM"] / mean_trasm) / 4
+    ) * df_raw["Elasticity"] * (1 + 0.1 * df_raw["Spill Rate"])
 
     min_score = df_raw["Raw Usefulness"].min()
     df_raw["Usefulness"] = df_raw["Raw Usefulness"] - min_score if min_score < 0 else df_raw["Raw Usefulness"]
+
+    st.markdown("""
+    ### ℹ️ Usefulness Score Definition
+    This metric combines:
+    - **Stage-Length-Adjusted Yield** (normalized against system mean)
+    - **Load Factor** (relative to system mean)
+    - **RASM** and **TRASM** (as profitability and revenue indicators)
+    - Adjusted for **Elasticity** and **Spill Rate**
+    
+    Formula:
+    ```
+    Usefulness = 
+        [ (NormYield_z + LF_ratio + RASM_ratio + TRASM_ratio) / 4 ] 
+        × Elasticity × (1 + 0.1 × Spill Rate)
+    ```
+    Based on methods from *The Global Airline Industry* (Belobaba, Odoni, Barnhart).
+    """)
 
     tab1, tab2 = st.tabs(["📊 Summary View", "🔍 Route Analysis"])
 
@@ -135,7 +159,8 @@ try:
         df_view = df_view.drop_duplicates(subset=["ScenarioLabel", "AF"])
         df_view = df_view.sort_values("Usefulness", ascending=False)
         st.dataframe(df_view[[
-            "AF", "Departure Airport", "Arrival Airport", "ASM", "RASM", "Load Factor", "Usefulness", "Cut", "Days Operated"
+            "AF", "Departure Airport", "Arrival Airport", "ASM", "RASM", "TRASM", "Load Factor",
+            "Unconstrained O&D Revenue", "Usefulness", "Cut", "Days Operated"
         ]], use_container_width=True)
 
 except Exception as e:
