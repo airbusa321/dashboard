@@ -30,14 +30,19 @@ try:
     }, inplace=True)
 
     df_raw["Distance (mi)"] = df_raw["Distance (km)"] / 1.60934
+    df_raw["AF"] = df_raw["AF"].astype(str)
 
+    # Assign Days Operated
+    days_op = df_raw.groupby(["ScenarioLabel", "AF"])["Day of Week"].nunique().clip(upper=7).reset_index()
+    days_op.columns = ["ScenarioLabel", "AF", "Days Operated"]
+    df_raw = df_raw.merge(days_op, on=["ScenarioLabel", "AF"], how="left")
+
+    # Scenario selection
     scenario_options = df_raw["ScenarioLabel"].dropna().unique().tolist()
     selected_scenario = st.sidebar.selectbox("Scenario", scenario_options)
     df_raw = df_raw[df_raw["ScenarioLabel"] == selected_scenario]
 
     is_weekly = st.sidebar.checkbox("Show values as weekly")
-
-    df_raw["Days Operated"] = df_raw.groupby("AF")["Day of Week"].transform("nunique")
 
     id_fields = ["AF", "Departure Airport", "Arrival Airport", "Hub (nested)"]
     numeric_fields = [
@@ -57,15 +62,17 @@ try:
     df["Raw Yield (¢/mi)"] = raw_yield
     df["Normalized Yield (¢/mi)"] = coeffs[0] * log_lengths + coeffs[1]
 
-    df["ASM"] = df["Seats"] * df["Distance (mi)"] * df["Days Operated"]
-    df["RPM"] = df["Constrained Segment Pax"] * df["Distance (mi)"] * df["Days Operated"]
+    # Final calculations
+    df["ASM"] = df["Seats"] * df["Distance (mi)"]
+    df["RPM"] = df["Constrained Segment Pax"] * df["Distance (mi)"]
     df["Load Factor"] = df["RPM"] / df["ASM"] * 100
     df["RASM"] = df["Constrained Segment Revenue"] / df["ASM"] * 100
     df["RASK (¢/mi)"] = df["Constrained RASK (cent)"] * 1.60934
+    df["AC"] = 1  # proxy
 
     df["Spill Rate"] = 1.0
     df["Elasticity"] = df.apply(
-        lambda row: 1.2 if row["Constrained Segment Pax"] > 1.1 * row["Seats"] * row["Days Operated"] * 0.7 else 1.0,
+        lambda row: 1.2 if row["Constrained Segment Pax"] > 1.1 * row["Seats"] * 0.7 else 1.0,
         axis=1
     )
 
@@ -92,38 +99,34 @@ try:
             asm = group["ASM"].sum() * factor
             revenue = group["Constrained Segment Revenue"].sum() * factor
             rpm = group["RPM"].sum() * factor
-            seats = group["Seats"].sum() * factor
             deps = group["Days Operated"].sum() * factor
             sl = group["Distance (mi)"].mean()
-            sla_trasm = np.average(group["Normalized Yield (¢/mi)"], weights=group["ASM"]) if asm > 0 else 0
+            sla_trasm = np.average(group["RASK (¢/mi)"], weights=group["ASM"]) if asm > 0 else 0
             result.append({
                 "NetworkType": name,
                 "Revenue ($000)": revenue / 1000,
                 "ASMs (000s)": asm / 1000,
                 "SL (mi)": sl,
                 "TRASM (¢/mi)": (revenue / asm) * 100 if asm > 0 else 0,
-                "SLA_TRASM (¢/mi)": sla_trasm,
-                "Seats": seats,
+                "SLA TRASM (¢/mi)": sla_trasm,
                 "Deps": deps,
-                "LF": (rpm / asm) * 100 if asm > 0 else 0
+                "AC": group["AC"].sum()
             })
         all_up = df.copy()
         asm = all_up["ASM"].sum()
         revenue = all_up["Constrained Segment Revenue"].sum()
         rpm = all_up["RPM"].sum()
-        seats = all_up["Seats"].sum()
         deps = all_up["Days Operated"].sum()
-        sla_trasm = np.average(all_up["Normalized Yield (¢/mi)"], weights=all_up["ASM"]) if asm > 0 else 0
+        sla_trasm = np.average(all_up["RASK (¢/mi)"], weights=all_up["ASM"]) if asm > 0 else 0
         result.append({
             "NetworkType": "System Total",
             "Revenue ($000)": revenue / 1000,
             "ASMs (000s)": asm / 1000,
             "SL (mi)": all_up["Distance (mi)"].mean(),
             "TRASM (¢/mi)": (revenue / asm) * 100 if asm > 0 else 0,
-            "SLA_TRASM (¢/mi)": sla_trasm,
-            "Seats": seats,
+            "SLA TRASM (¢/mi)": sla_trasm,
             "Deps": deps,
-            "LF": (rpm / asm) * 100 if asm > 0 else 0
+            "AC": all_up["AC"].sum()
         })
         return pd.DataFrame(result)
 
@@ -158,10 +161,10 @@ try:
     col3.metric("Avg Yield", f"{avg_yield:.2f}¢/mi")
 
     st.markdown("---")
-    tab1, tab2 = st.tabs(["Route Table", "Top 15 by Usefulness"])
+    tab1, tab2 = st.tabs(["All Filtered Routes", "Top 15 by Usefulness"])
 
     with tab1:
-        st.subheader(f"📈 Filtered Routes for {hub_filter} — {selected_scenario}")
+        st.subheader(f"📈 All Routes for {hub_filter} — {selected_scenario}")
         st.dataframe(df_sorted[[
             "AF", "Route", "NetworkType", "Days Operated", "ASM", "RASM", "Load Factor",
             "Raw Yield (¢/mi)", "Normalized Yield (¢/mi)", "Elasticity", "Usefulness"
@@ -169,7 +172,9 @@ try:
 
     with tab2:
         st.subheader("🔹 Top 15 Routes")
-        st.dataframe(selected.sort_values("Usefulness", ascending=False)[["AF", "Route", "ASM", "RASM", "Usefulness"]].head(15), use_container_width=True)
+        st.dataframe(selected.sort_values("Usefulness", ascending=False)[[
+            "AF", "Route", "ASM", "RASM", "Usefulness"
+        ]].head(15), use_container_width=True)
 
     st.markdown("---")
     st.download_button("Download CSV", df_sorted.to_csv(index=False), "filtered_routes.csv")
