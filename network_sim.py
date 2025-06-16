@@ -40,8 +40,7 @@ try:
     id_fields = ["AF", "Departure Airport", "Arrival Airport", "Hub (nested)"]
     numeric_fields = [
         "Constrained Segment Revenue", "Constrained Yield (cent, km)", "Constrained RASK (cent)",
-        "Distance (mi)", "Seats", "Constrained Segment Pax", "ASM", "RPM", "Load Factor",
-        "RASM", "RASK (¢/mi)", "Raw Yield (¢/mi)", "Normalized Yield (¢/mi)"
+        "Distance (mi)", "Seats", "Constrained Segment Pax"
     ]
 
     df_grouped = df_raw.groupby(id_fields, as_index=False)[numeric_fields].sum()
@@ -52,18 +51,13 @@ try:
     df["NetworkType"] = df["Hub (nested)"].apply(lambda h: h.strip() if h.strip() in ["FLL", "LAS", "DTW", "MCO"] else "P2P")
 
     market_summary = df.groupby("NetworkType").agg(
-        Weekly_Departures=("AF", "nunique"),
-        ASMs_Million=("ASM", lambda x: round(x.sum() / 1_000_000, 1)),
-        LF=("Load Factor", "mean"),
-        AvgRevPerPax=("Constrained Segment Revenue", "sum"),
-        Yield_constr=("Raw Yield (¢/mi)", "mean"),
-        Yield_unc=("Normalized Yield (¢/mi)", "mean"),
-        SLA_RASM=("RASM", "mean"),
-        RASM_constr=("RASM", "mean"),
-        RASM_unc=("RASK (¢/mi)", "mean"),
-        CASM_variable=("RASK (¢/mi)", "mean"),
-        CASM_ex_own=("RASK (¢/mi)", "mean"),
-        CASM_pretax=("RASK (¢/mi)", "mean")
+        Revenue=("Constrained Segment Revenue", "sum"),
+        ASMs=("ASM", "sum"),
+        SL=("Distance (mi)", "mean"),
+        TRASM=("ASM", lambda asm: (df.loc[asm.index, "Constrained Segment Revenue"].sum() / asm.sum()) * 100),
+        SLA_TRASM=("ASM", lambda asm: (df.loc[asm.index, "Normalized Yield (¢/mi)"].mul(asm).sum() / asm.sum())),
+        Seats=("Seats", "sum"),
+        Deps=("Days Operated", "sum")
     ).reset_index()
 
     df["Route"] = df["Departure Airport"] + "-" + df["Arrival Airport"]
