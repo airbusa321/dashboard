@@ -4,6 +4,7 @@ import numpy as np
 
 st.set_page_config(page_title="Spirit Network Strategy Dashboard", layout="wide")
 st.title("🛫 Spirit Airlines Network Planning Dashboard")
+st.caption("*All dollar and ASM values shown in thousands")
 
 file_path = "root_data.xlsx"
 
@@ -92,14 +93,29 @@ try:
             sla_trasm = np.average(group["Normalized Yield (¢/mi)"], weights=group["ASM"]) if asm > 0 else 0
             result.append({
                 "NetworkType": name,
-                "Revenue": revenue,
-                "ASMs": asm,
-                "SL": sl,
-                "TRASM": (revenue / asm) * 100 if asm > 0 else 0,
-                "SLA_TRASM": sla_trasm,
+                "Revenue ($000)": revenue / 1000,
+                "ASMs (000s)": asm / 1000,
+                "SL (mi)": sl,
+                "TRASM (¢/mi)": (revenue / asm) * 100 if asm > 0 else 0,
+                "SLA_TRASM (¢/mi)": sla_trasm,
                 "Seats": group["Seats"].sum(),
                 "Deps": group["Days Operated"].sum()
             })
+        all_up = df.copy()
+        asm = all_up["ASM"].sum()
+        revenue = all_up["Constrained Segment Revenue"].sum()
+        sl = all_up["Distance (mi)"].mean()
+        sla_trasm = np.average(all_up["Normalized Yield (¢/mi)"], weights=all_up["ASM"]) if asm > 0 else 0
+        result.append({
+            "NetworkType": "System Total",
+            "Revenue ($000)": revenue / 1000,
+            "ASMs (000s)": asm / 1000,
+            "SL (mi)": sl,
+            "TRASM (¢/mi)": (revenue / asm) * 100 if asm > 0 else 0,
+            "SLA_TRASM (¢/mi)": sla_trasm,
+            "Seats": all_up["Seats"].sum(),
+            "Deps": all_up["Days Operated"].sum()
+        })
         return pd.DataFrame(result)
 
     market_summary = compute_market_summary(df)
@@ -118,10 +134,10 @@ try:
     df_sorted["CumulativeASM"] = df_sorted["ASM"].cumsum()
     selected = df_sorted[df_sorted["CumulativeASM"] <= target_asm].copy()
 
-    total_asm = df_sorted["ASM"].sum()
-    total_rev = df_sorted["Constrained Segment Revenue"].sum()
+    total_asm = df_filtered["ASM"].sum()
+    total_rev = df_filtered["Constrained Segment Revenue"].sum()
     avg_rasm = total_rev / total_asm * 100 if total_asm > 0 else 0
-    avg_yield = df_sorted["Raw Yield (¢/mi)"].mean()
+    avg_yield = df_filtered["Raw Yield (¢/mi)"].mean()
 
     col1, col2, col3 = st.columns(3)
     col1.metric("Total ASM", f"{total_asm / 1_000_000:,.1f}M")
