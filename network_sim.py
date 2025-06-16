@@ -39,14 +39,12 @@ try:
         lambda h: h.strip() if h.strip() in ["FLL", "LAS", "DTW", "MCO"] else "P2P"
     )
 
-    # Compute days operated per unique flight using just AF
     days_op = df_raw.groupby(["ScenarioLabel", "AF"])["Day of Week"].nunique().clip(upper=7).reset_index()
     days_op.columns = ["ScenarioLabel", "AF", "Days Operated"]
     df_raw = df_raw.merge(days_op, on=["ScenarioLabel", "AF"], how="left")
 
     df_raw["RouteID"] = df_raw["ScenarioLabel"] + ":" + df_raw["AF"]
 
-    # Usefulness calculation based on Belobaba-style methodology
     df_raw["Raw Yield (¢/mi)"] = df_raw["Constrained Yield (cent, km)"] * 1.60934
     log_lengths = np.log(df_raw["Distance (mi)"] + 1)
     coeffs = np.polyfit(log_lengths, df_raw["Raw Yield (¢/mi)"], 1)
@@ -66,18 +64,16 @@ try:
     mean_lf = df_raw["Load Factor"].mean()
     mean_rasm = df_raw["RASM"].mean()
 
+    # Belobaba-style SL-adjusted usefulness
     df_raw["Raw Usefulness"] = (
-        ((df_raw["Normalized Yield (¢/mi)"] - mean_yield) / std_yield) *
-        (df_raw["Load Factor"] / mean_lf) *
-        (df_raw["RASM"] / mean_rasm) *
-        (1 + 0.1) *
-        df_raw["Elasticity"]
-    )
+        ((df_raw["Normalized Yield (¢/mi)"] - mean_yield) / std_yield) +
+        (df_raw["Load Factor"] / mean_lf) +
+        (df_raw["RASM"] / mean_rasm)
+    ) / 3 * df_raw["Elasticity"]
 
     min_score = df_raw["Raw Usefulness"].min()
     df_raw["Usefulness"] = df_raw["Raw Usefulness"] - min_score if min_score < 0 else df_raw["Raw Usefulness"]
 
-    # Tabs for Overview and Route Analysis
     tab1, tab2 = st.tabs(["📊 Summary View", "🔍 Route Analysis"])
 
     with tab1:
