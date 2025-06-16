@@ -119,10 +119,11 @@ try:
         return pd.DataFrame(result)
 
     market_summary = compute_market_summary(df)
+    system_total_asm_thousands = market_summary.loc[market_summary["NetworkType"] == "System Total", "ASMs (000s)"].values[0]
 
     st.sidebar.header("🛫 Strategic Inputs")
     hub_filter = st.sidebar.selectbox("Hub Focus", ["Full Network", "DTW", "MCO", "LAS", "FLL", "P2P"])
-    target_asm = st.sidebar.number_input("🛬 Max Deployable ASM", 0, 10_000_000_000, 800_000_000)
+    target_asm = st.sidebar.number_input("🛬 Max Deployable ASM (000s)", 0, int(system_total_asm_thousands * 10), int(system_total_asm_thousands)) * 1000
     min_rasm = st.sidebar.number_input("💰 Min Acceptable RASM (¢/mi)", 0.0, 50.0, 8.0)
 
     df_filtered = df.copy()
