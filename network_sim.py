@@ -35,17 +35,18 @@ try:
     selected_scenario = st.sidebar.selectbox("Scenario", scenario_options)
     df_raw = df_raw[df_raw["ScenarioLabel"] == selected_scenario]
 
-    flight_freq = df_raw.groupby("AF")["Day of Week"].nunique().reset_index()
-    flight_freq.columns = ["AF", "Days Operated"]
+    is_weekly = st.sidebar.checkbox("Show values as weekly")
+
+    df_raw["Days Operated"] = df_raw.groupby("AF")["Day of Week"].transform("nunique")
 
     id_fields = ["AF", "Departure Airport", "Arrival Airport", "Hub (nested)"]
     numeric_fields = [
         "Constrained Segment Revenue", "Constrained Yield (cent, km)", "Constrained RASK (cent)",
-        "Distance (mi)", "Seats", "Constrained Segment Pax"
+        "Distance (mi)", "Seats", "Constrained Segment Pax", "Days Operated"
     ]
 
     df_grouped = df_raw.groupby(id_fields, as_index=False)[numeric_fields].sum()
-    df = df_grouped.merge(flight_freq, on="AF", how="left")
+    df = df_grouped.copy()
 
     df["Route"] = df["Departure Airport"] + "-" + df["Arrival Airport"]
     df["NetworkType"] = df["Hub (nested)"].apply(lambda h: h.strip() if h.strip() in ["FLL", "LAS", "DTW", "MCO"] else "P2P")
@@ -87,8 +88,12 @@ try:
     def compute_market_summary(df):
         result = []
         for name, group in df.groupby("NetworkType"):
-            asm = group["ASM"].sum()
-            revenue = group["Constrained Segment Revenue"].sum()
+            factor = 1 / 7 if is_weekly else 1
+            asm = group["ASM"].sum() * factor
+            revenue = group["Constrained Segment Revenue"].sum() * factor
+            rpm = group["RPM"].sum() * factor
+            seats = group["Seats"].sum() * factor
+            deps = group["Days Operated"].sum() * factor
             sl = group["Distance (mi)"].mean()
             sla_trasm = np.average(group["Normalized Yield (¢/mi)"], weights=group["ASM"]) if asm > 0 else 0
             result.append({
@@ -98,27 +103,34 @@ try:
                 "SL (mi)": sl,
                 "TRASM (¢/mi)": (revenue / asm) * 100 if asm > 0 else 0,
                 "SLA_TRASM (¢/mi)": sla_trasm,
-                "Seats": group["Seats"].sum(),
-                "Deps": group["Days Operated"].sum()
+                "Seats": seats,
+                "Deps": deps,
+                "LF": (rpm / asm) * 100 if asm > 0 else 0
             })
         all_up = df.copy()
         asm = all_up["ASM"].sum()
         revenue = all_up["Constrained Segment Revenue"].sum()
-        sl = all_up["Distance (mi)"].mean()
+        rpm = all_up["RPM"].sum()
+        seats = all_up["Seats"].sum()
+        deps = all_up["Days Operated"].sum()
         sla_trasm = np.average(all_up["Normalized Yield (¢/mi)"], weights=all_up["ASM"]) if asm > 0 else 0
         result.append({
             "NetworkType": "System Total",
             "Revenue ($000)": revenue / 1000,
             "ASMs (000s)": asm / 1000,
-            "SL (mi)": sl,
+            "SL (mi)": all_up["Distance (mi)"].mean(),
             "TRASM (¢/mi)": (revenue / asm) * 100 if asm > 0 else 0,
             "SLA_TRASM (¢/mi)": sla_trasm,
-            "Seats": all_up["Seats"].sum(),
-            "Deps": all_up["Days Operated"].sum()
+            "Seats": seats,
+            "Deps": deps,
+            "LF": (rpm / asm) * 100 if asm > 0 else 0
         })
         return pd.DataFrame(result)
 
     market_summary = compute_market_summary(df)
+    st.subheader("📊 Market Summary")
+    st.dataframe(market_summary, use_container_width=True)
+
     system_total_asm_thousands = market_summary.loc[market_summary["NetworkType"] == "System Total", "ASMs (000s)"].values[0]
 
     st.sidebar.header("🛫 Strategic Inputs")
@@ -146,19 +158,14 @@ try:
     col3.metric("Avg Yield", f"{avg_yield:.2f}¢/mi")
 
     st.markdown("---")
-    tab1, tab2 = st.tabs(["Route Table + Market Summary", "Top 15 by Usefulness"])
+    tab1, tab2 = st.tabs(["Route Table", "Top 15 by Usefulness"])
 
     with tab1:
         st.subheader(f"📈 Filtered Routes for {hub_filter} — {selected_scenario}")
-        colA, colB = st.columns([3, 2])
-        with colA:
-            st.dataframe(df_sorted[[
-                "AF", "Route", "NetworkType", "Days Operated", "ASM", "RASM", "Load Factor",
-                "Raw Yield (¢/mi)", "Normalized Yield (¢/mi)", "Elasticity", "Usefulness"
-            ]], use_container_width=True)
-        with colB:
-            st.subheader("📊 Market Summary")
-            st.dataframe(market_summary, use_container_width=True)
+        st.dataframe(df_sorted[[
+            "AF", "Route", "NetworkType", "Days Operated", "ASM", "RASM", "Load Factor",
+            "Raw Yield (¢/mi)", "Normalized Yield (¢/mi)", "Elasticity", "Usefulness"
+        ]], use_container_width=True)
 
     with tab2:
         st.subheader("🔹 Top 15 Routes")
