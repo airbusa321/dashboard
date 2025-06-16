@@ -39,6 +39,13 @@ try:
         lambda h: h.strip() if h.strip() in ["FLL", "LAS", "DTW", "MCO"] else "P2P"
     )
 
+    # Compute days operated per unique flight using just AF
+    days_op = df_raw.groupby(["ScenarioLabel", "AF"])["Day of Week"].nunique().clip(upper=7).reset_index()
+    days_op.columns = ["ScenarioLabel", "AF", "Days Operated"]
+    df_raw = df_raw.merge(days_op, on=["ScenarioLabel", "AF"], how="left")
+
+    df_raw["RouteID"] = df_raw["ScenarioLabel"] + ":" + df_raw["AF"]
+
     # Usefulness calculation based on Belobaba-style methodology
     df_raw["Raw Yield (¢/mi)"] = df_raw["Constrained Yield (cent, km)"] * 1.60934
     log_lengths = np.log(df_raw["Distance (mi)"] + 1)
@@ -129,9 +136,10 @@ try:
         if show_only_cut:
             df_view = df_view[df_view["Cut"] == 1]
 
+        df_view = df_view.drop_duplicates(subset=["ScenarioLabel", "AF"])
         df_view = df_view.sort_values("Usefulness", ascending=False)
         st.dataframe(df_view[[
-            "AF", "Departure Airport", "Arrival Airport", "ASM", "RASM", "Load Factor", "Usefulness", "Cut"
+            "AF", "Departure Airport", "Arrival Airport", "ASM", "RASM", "Load Factor", "Usefulness", "Cut", "Days Operated"
         ]], use_container_width=True)
 
 except Exception as e:
