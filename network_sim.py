@@ -6,7 +6,9 @@ st.set_page_config(page_title="Spirit Network Strategy Dashboard", layout="wide"
 st.title("🛫 Spirit Airlines Network Planning Dashboard")
 st.caption("*All dollar and ASM values shown in thousands")
 
+# Load base data
 file_path = "root_data.xlsx"
+pavlina_path = "root_2.xlsx"
 
 try:
     xlsx = pd.ExcelFile(file_path)
@@ -32,8 +34,7 @@ try:
         "Cut": "Cut"
     }, inplace=True)
 
-    # ✅ Load Pavlina Assumptions from root_2.xls and append as new scenario
-    pavlina_path = "root_2.xlsx"
+    # --- ✅ Pavlina assumptions integration ---
     try:
         df_pav = pd.read_excel(pavlina_path)
         df_pav.columns = [str(c).strip() for c in df_pav.columns]
@@ -41,35 +42,32 @@ try:
         df_pav["Departure Airport"] = df_pav["O"].astype(str).str.strip()
         df_pav["Arrival Airport"] = df_pav["D"].astype(str).str.strip()
         df_pav["AF"] = df_pav["Departure Airport"] + df_pav["Arrival Airport"]
-        df_pav["AF"] = df_pav["AF"].astype(str)
         df_pav["ScenarioLabel"] = "Pavlina Assumptions"
-
-        df_pav["Distance (mi)"] = df_pav["SL"]
-        df_pav["ASM"] = df_pav["Added ASMs"]
-        df_pav["Unconstrained O&D Revenue"] = df_pav["Added ASMs * TRASM"]
+        df_pav["Distance (mi)"] = pd.to_numeric(df_pav["SL"], errors="coerce")
+        df_pav["ASM"] = pd.to_numeric(df_pav["Added ASMs"], errors="coerce")
+        df_pav["Unconstrained O&D Revenue"] = pd.to_numeric(df_pav["Added ASMs * TRASM"], errors="coerce")
         df_pav["Constrained Segment Revenue"] = 0
         df_pav["Constrained Segment Pax"] = 0
-        df_pav["Seats"] = 0
+        df_pav["Seats"] = 1
         df_pav["Cut"] = 0
         df_pav["Day of Week"] = 1
         df_pav["Hub (nested)"] = "P2P"
         df_pav["Spill Rate"] = 1.0
+        df_pav["Constrained Yield (cent, km)"] = 0
 
-        needed_cols = df_raw.columns
-        for col in needed_cols:
+        for col in df_raw.columns:
             if col not in df_pav.columns:
                 df_pav[col] = np.nan
-        df_pav = df_pav[needed_cols]
+        df_pav = df_pav[df_raw.columns]
 
         df_raw = pd.concat([df_raw, df_pav], ignore_index=True)
 
     except Exception as e:
-        st.warning(f"⚠️ Failed to load or process Pavlina file (root_2.xls): {e}")
+        st.warning(f"⚠️ Failed to load or process Pavlina file (root_2.xlsx): {e}")
 
-    df_raw["Distance (mi)"] = df_raw["Distance (mi)"]
-    df_raw["ASM"] = df_raw["Seats"] * df_raw["Distance (mi)"]
+    # --- 🧮 Engineering ---
     df_raw["AF"] = df_raw["AF"].astype(str)
-
+    df_raw["ASM"] = df_raw["Seats"] * df_raw["Distance (mi)"]
     df_raw["NetworkType"] = df_raw["Hub (nested)"].apply(
         lambda h: h.strip() if str(h).strip() in ["FLL", "LAS", "DTW", "MCO"] else "P2P"
     )
@@ -80,17 +78,16 @@ try:
 
     df_raw["RouteID"] = df_raw["ScenarioLabel"] + ":" + df_raw["AF"]
 
+    # Stage-length adjusted yields
     df_raw["Raw Yield (¢/mi)"] = df_raw["Constrained Yield (cent, km)"] * 1.60934
     log_lengths = np.log(df_raw["Distance (mi)"] + 1)
-    coeffs = np.polyfit(log_lengths.dropna(), df_raw.loc[log_lengths.notna(), "Raw Yield (¢/mi)"], 1)
+    coeffs = np.polyfit(log_lengths.fillna(0), df_raw["Raw Yield (¢/mi)"].fillna(0), 1)
     df_raw["Normalized Yield (¢/mi)"] = coeffs[0] * log_lengths + coeffs[1]
 
     df_raw["RPM"] = df_raw["Constrained Segment Pax"] * df_raw["Distance (mi)"]
     df_raw["Load Factor"] = df_raw["RPM"] / df_raw["ASM"] * 100
     df_raw["RASM"] = df_raw["Constrained Segment Revenue"] / df_raw["ASM"] * 100
     df_raw["TRASM"] = df_raw["Unconstrained O&D Revenue"] / df_raw["ASM"] * 100
-
-    df_raw["Spill Rate"] = df_raw["Spill Rate"] if "Spill Rate" in df_raw.columns else 1.0
 
     df_raw["Elasticity"] = df_raw.apply(
         lambda row: 1.2 if row["Constrained Segment Pax"] > 1.1 * row["Seats"] * 0.7 else 1.0,
@@ -113,12 +110,13 @@ try:
     min_score = df_raw["Raw Usefulness"].min()
     df_raw["Usefulness"] = df_raw["Raw Usefulness"] - min_score if min_score < 0 else df_raw["Raw Usefulness"]
 
+    # --- Display ---
     st.markdown("""
     ### ℹ️ Usefulness Score Definition
     This metric combines:
     - **Stage-Length-Adjusted Yield** (normalized against system mean)
     - **Load Factor** (relative to system mean)
-    - **RASM** and **TRASM** (as profitability and revenue indicators)
+    - **RASM** and **TRASM**
     - Adjusted for **Elasticity** and **Spill Rate**
     """)
 
@@ -157,7 +155,7 @@ try:
 
         df_view = df_view.drop_duplicates(subset=["ScenarioLabel", "AF"])
         df_view = df_view.sort_values("Usefulness", ascending=False)
-        st.dataframe(df_view[[
+        st.dataframe(df_view[[ 
             "AF", "Departure Airport", "Arrival Airport", "ASM", "RASM", "TRASM", "Load Factor",
             "Raw Yield (¢/mi)", "Normalized Yield (¢/mi)",
             "Constrained Segment Revenue", "Unconstrained O&D Revenue",
