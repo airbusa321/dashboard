@@ -101,11 +101,11 @@ try:
     df_raw["RASM"] = df_raw["Constrained Segment Revenue"] / df_raw["ASM"] * 100
     df_raw["TRASM"] = df_raw["Unconstrained O&D Revenue"] / df_raw["ASM"] * 100
 
+    # Updated fallback logic after RASM/TRASM/Load Factor calculation
     df_base_lookup = (
         df_raw[df_raw["ScenarioLabel"] != "Pavlina Assumptions"]
-        .sort_values("ScenarioLabel")
-        .drop_duplicates(subset=["AF"])
-        .set_index("AF")
+        .drop_duplicates(subset=["Departure Airport", "Arrival Airport"])
+        .set_index(["Departure Airport", "Arrival Airport"])
     )
 
     fallback_cols = [
@@ -119,16 +119,14 @@ try:
     ]
 
     pav_mask = df_raw["ScenarioLabel"] == "Pavlina Assumptions"
-    df_raw.loc[pav_mask, "AF_from_Market"] = (
-        df_raw.loc[pav_mask, "Departure Airport"].astype(str).str.strip() +
-        df_raw.loc[pav_mask, "Arrival Airport"].astype(str).str.strip()
-    )
-
     for col in fallback_cols:
-        fallback_series = df_raw.loc[pav_mask, "AF_from_Market"].map(df_base_lookup[col])
+        match_keys = list(zip(df_raw.loc[pav_mask, "Departure Airport"], df_raw.loc[pav_mask, "Arrival Airport"]))
+        fallback_series = pd.Series(index=df_raw.loc[pav_mask].index, dtype=float)
+        for idx, key in zip(df_raw.loc[pav_mask].index, match_keys):
+            if key in df_base_lookup.index:
+                fallback_series.at[idx] = df_base_lookup.at[key, col]
         original = df_raw.loc[pav_mask, col]
-        updated = original.mask((original.isna() | (original == 0)) & fallback_series.notna(), fallback_series)
-        df_raw.loc[pav_mask, col] = updated
+        df_raw.loc[pav_mask, col] = original.mask((original.isna() | (original == 0)) & fallback_series.notna(), fallback_series)
 
     df_raw["Elasticity"] = df_raw.apply(
         lambda row: 1.2 if row["Constrained Segment Pax"] > 1.1 * row["Seats"] * 0.7 else 1.0,
