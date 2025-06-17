@@ -127,14 +127,27 @@ try:
         axis=1
     )
 
-    # Stage-length-normalized TRASM
-    log_stage = np.log(df_raw["Distance (mi)"].fillna(1))
-    trasm_fit = np.polyfit(log_stage, df_raw["TRASM"].fillna(0), 1)
-    df_raw["Normalized TRASM"] = trasm_fit[0] * log_stage + trasm_fit[1]
+            # Safe stage-length-normalized TRASM with SVD protection
+        valid_mask = (
+            df_raw["Distance (mi)"].notna() &
+            df_raw["Distance (mi)"] > 0 &
+            df_raw["TRASM"].notna() &
+            np.isfinite(df_raw["TRASM"])
+        )
+        
+        if valid_mask.sum() > 10:
+            log_stage_clean = np.log(df_raw.loc[valid_mask, "Distance (mi)"])
+            trasm_clean = df_raw.loc[valid_mask, "TRASM"]
+            trasm_fit = np.polyfit(log_stage_clean, trasm_clean, 1)
+            df_raw["Normalized TRASM"] = trasm_fit[0] * np.log(df_raw["Distance (mi)"].fillna(1)) + trasm_fit[1]
+        else:
+            st.warning("⚠️ Not enough valid data to compute adjusted TRASM. Using raw TRASM.")
+            df_raw["Normalized TRASM"] = df_raw["TRASM"]
 
-    df_raw["Raw Usefulness"] = (
-        (df_raw["TRASM"] - df_raw["Normalized TRASM"]) / df_raw["Normalized TRASM"]
-    ) * df_raw["Elasticity"] * (1 + 0.1 * df_raw["Spill Rate"])
+df_raw["Raw Usefulness"] = (
+    (df_raw["TRASM"] - df_raw["Normalized TRASM"]) / df_raw["Normalized TRASM"]
+) * df_raw["Elasticity"] * (1 + 0.1 * df_raw["Spill Rate"])
+
 
     min_score = df_raw["Raw Usefulness"].min()
     df_raw["Usefulness"] = df_raw["Raw Usefulness"] - min_score if min_score < 0 else df_raw["Raw Usefulness"]
