@@ -67,7 +67,7 @@ try:
 
     # 🧮 Engineering
     df_raw["AF"] = df_raw["AF"].astype(str)
-    df_raw["ASM"] = df_raw["Seats"] * df_raw["Distance (mi)"]
+    df_raw["ASM"] = df_raw["ASM"].combine_first(df_raw["Seats"] * df_raw["Distance (mi)"])
     df_raw["NetworkType"] = df_raw["Hub (nested)"].apply(
         lambda h: h.strip() if str(h).strip() in ["FLL", "LAS", "DTW", "MCO"] else "P2P"
     )
