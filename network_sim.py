@@ -82,6 +82,36 @@ try:
                 df_pav[col] = np.nan
         df_pav = df_pav[df_raw.columns]
         df_raw = pd.concat([df_raw, df_pav], ignore_index=True)
+      # 1. Create base scenario lookup table by AF code
+df_base_lookup = (
+    df_raw[df_raw["ScenarioLabel"] != "Pavlina Assumptions"]
+    .sort_values("ScenarioLabel")  # optional: prioritize more recent scenarios
+    .drop_duplicates(subset=["AF"])
+    .set_index("AF")
+)
+
+# 2. Define fields to backfill if missing/zero in Pavlina scenario
+fallback_cols = [
+    "Constrained Segment Pax",
+    "Constrained Segment Revenue",
+    "Load Factor",
+    "Constrained Yield (cent, km)",
+    "RASM",
+    "TRASM",
+    "Raw Yield (¢/mi)",
+]
+
+# 3. Apply fallback only to Pavlina rows
+pav_mask = df_raw["ScenarioLabel"] == "Pavlina Assumptions"
+
+for col in fallback_cols:
+    fallback_series = df_raw.loc[pav_mask, "AF"].map(df_base_lookup[col])
+    original = df_raw.loc[pav_mask, col]
+
+    # Only update where original is 0 or NaN, and fallback value is not null
+    updated = original.mask((original.isna() | (original == 0)) & fallback_series.notna(), fallback_series)
+    df_raw.loc[pav_mask, col] = updated
+
 
     except Exception as e:
         st.warning(f"⚠️ Failed to load or process Pavlina file (root_3.xlsx): {e}")
