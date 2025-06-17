@@ -9,6 +9,7 @@ st.caption("*All dollar and ASM values shown in thousands")
 file_path = "root_data.xlsx"
 pavlina_path = "root_3.xlsx"
 
+# ---- Route Resilience Score (RRS) function ----
 def compute_rrs(df, 
                 cost_col='Costs1', 
                 profit_col='Profit1', 
@@ -16,26 +17,23 @@ def compute_rrs(df,
                 yield_col='Constrained Yield (cent, km)',
                 lf_col='Load Factor',
                 spill_col='Spill Rate',
-                market_avg_fare=None):
+                market_avg_fare=11.0):
 
     for col in [cost_col, profit_col, asm_col, yield_col, lf_col, spill_col]:
         df[col] = pd.to_numeric(df[col], errors='coerce')
 
     df['CASM (cent)'] = df[cost_col] / df[asm_col]
-    df['BELF'] = df['CASM (cent)'] / df[yield_col]
-    df['LF_minus_BELF'] = df[lf_col] / 100 - df['BELF']
+    df['BELF'] = df['CASM (cent)'] / df[yield_col].replace(0, np.nan)
+    df['LF_decimal'] = df[lf_col] / 100
+    df['LF_minus_BELF'] = df['LF_decimal'] - df['BELF']
     df['Spill_Adjusted'] = 1 - df[spill_col].replace(1, np.nan)
     df['Profit_per_ASM'] = df[profit_col] / (df[asm_col] * 1000)
     df['RRS_simplified'] = (df['LF_minus_BELF'] / df['Spill_Adjusted']) * df['Profit_per_ASM']
-
-    if market_avg_fare:
-        df['Fare_Premium'] = df[yield_col] / market_avg_fare
-        df['RRS'] = df['RRS_simplified'] * df['Fare_Premium']
-    else:
-        df['RRS'] = df['RRS_simplified']
-
+    df['Fare_Premium'] = df[yield_col] / market_avg_fare
+    df['RRS'] = df['RRS_simplified'] * df['Fare_Premium']
     return df
 
+# ---- Load and Process Data ----
 try:
     xlsx = pd.ExcelFile(file_path)
     if "NET_in" not in xlsx.sheet_names:
@@ -60,9 +58,11 @@ try:
         "Cut": "Cut"
     }, inplace=True)
 
+    # ---- Pavlina assumptions integration ----
     try:
         df_pav = pd.read_excel(pavlina_path)
         df_pav.columns = [str(c).strip() for c in df_pav.columns]
+
         df_pav["Departure Airport"] = df_pav["O"].astype(str).str.strip()
         df_pav["Arrival Airport"] = df_pav["D"].astype(str).str.strip()
         df_pav["AF"] = df_pav["Departure Airport"] + df_pav["Arrival Airport"]
@@ -88,9 +88,11 @@ try:
     except Exception as e:
         st.warning(f"⚠️ Failed to load or process Pavlina file (root_3.xlsx): {e}")
 
+    # ---- Engineering Metrics ----
     df_raw["AF"] = df_raw["AF"].astype(str)
     df_raw["ASM"] = df_raw["ASM"].combine_first(df_raw["Seats"] * df_raw["Distance (mi)"])
     df_raw["NetworkType"] = df_raw["Hub (nested)"].apply(lambda h: h.strip() if str(h).strip() in ["FLL", "LAS", "DTW", "MCO"] else "P2P")
+
     days_op = df_raw.groupby(["ScenarioLabel", "AF"])["Day of Week"].nunique().clip(upper=7).reset_index()
     days_op.columns = ["ScenarioLabel", "AF", "Days Operated"]
     df_raw = df_raw.merge(days_op, on=["ScenarioLabel", "AF"], how="left")
@@ -125,13 +127,19 @@ try:
     min_score = df_raw["Raw Usefulness"].min()
     df_raw["Usefulness"] = df_raw["Raw Usefulness"] - min_score if min_score < 0 else df_raw["Raw Usefulness"]
 
-    # 🧠 Add Route Resilience Score
-    df_raw = compute_rrs(df_raw, market_avg_fare=11.0)  # or None if unknown
+    # ---- Compute RRS ----
+    df_raw = compute_rrs(df_raw)
 
-    # 📊 Display
-    st.markdown("### ℹ️ Usefulness Score & Route Resilience")
-    st.markdown("""This dashboard combines demand elasticity, pricing power, and financial margin
-    to assess route viability and resilience. The Route Resilience Score (RRS) models each route’s ability to absorb competitive shocks.""")
+    # ---- Display ----
+    st.markdown("""
+    ### ℹ️ Usefulness Score & Route Resilience
+    This metric combines:
+    - **Stage-Length-Adjusted Yield**
+    - **Load Factor**
+    - **RASM** and **TRASM**
+    - Adjusted for **Elasticity** and **Spill Rate**
+    - Plus: **Route Resilience Score (RRS)** based on CASM, BELF, and profit per ASM
+    """)
 
     tab1, tab2 = st.tabs(["📊 Summary View", "🔍 Route Analysis"])
 
@@ -142,14 +150,14 @@ try:
 
         st.subheader(f"📊 Summary by Hub — {selected_scenario}")
         hub_summary = df_filtered.groupby("NetworkType").apply(lambda g: pd.Series({
-            "Weekly Departures": g.shape[0],
+            "Weekly Departures": g.shape[0] * 7 if g["ScenarioLabel"].iloc[0] == "Pavlina Assumptions" else g.shape[0],
             "ASMs (M)": g["ASM"].sum() / 1_000_000
         })).reset_index().rename(columns={"NetworkType": "Hub"})
         st.dataframe(hub_summary, use_container_width=True)
 
         st.subheader("📊 System-Level Summary")
         system_summary = df_raw.groupby("ScenarioLabel").apply(lambda g: pd.Series({
-            "Weekly Departures": g.shape[0],
+            "Weekly Departures": g.shape[0] * 7 if g["ScenarioLabel"].iloc[0] == "Pavlina Assumptions" else g.shape[0],
             "ASMs (M)": g["ASM"].sum() / 1_000_000
         })).reset_index().rename(columns={"ScenarioLabel": "Scenario"})
         st.dataframe(system_summary, use_container_width=True)
@@ -166,10 +174,10 @@ try:
 
         df_view = df_view.drop_duplicates(subset=["ScenarioLabel", "AF"])
         df_view = df_view.sort_values("Usefulness", ascending=False)
-
         st.dataframe(df_view[[ 
             "AF", "Departure Airport", "Arrival Airport", "ASM", "RASM", "TRASM", "Load Factor",
             "Raw Yield (¢/mi)", "Normalized Yield (¢/mi)",
+            "Constrained Segment Revenue", "Unconstrained O&D Revenue",
             "Usefulness", "RRS", "Cut", "Days Operated"
         ]], use_container_width=True)
 
