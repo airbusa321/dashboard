@@ -35,35 +35,40 @@ try:
     }, inplace=True)
 
     # --- ✅ Pavlina assumptions integration ---
-    try:
-        df_pav = pd.read_excel(pavlina_path)
-        df_pav.columns = [str(c).strip() for c in df_pav.columns]
+try:
+    df_pav = pd.read_excel("root_3.xlsx")
+    df_pav.columns = [str(c).strip() for c in df_pav.columns]
 
-        df_pav["Departure Airport"] = df_pav["O"].astype(str).str.strip()
-        df_pav["Arrival Airport"] = df_pav["D"].astype(str).str.strip()
-        df_pav["AF"] = df_pav["Departure Airport"] + df_pav["Arrival Airport"]
-        df_pav["ScenarioLabel"] = "Pavlina Assumptions"
-        df_pav["Distance (mi)"] = pd.to_numeric(df_pav["SL"], errors="coerce")
-        df_pav["ASM"] = pd.to_numeric(df_pav["Added ASMs"], errors="coerce")
-        df_pav["Unconstrained O&D Revenue"] = pd.to_numeric(df_pav["Added ASMs * TRASM"], errors="coerce")
-        df_pav["Constrained Segment Revenue"] = 0
-        df_pav["Constrained Segment Pax"] = 0
-        df_pav["Seats"] = 1
-        df_pav["Cut"] = 0
-        df_pav["Day of Week"] = 1
-        df_pav["Hub (nested)"] = "P2P"
-        df_pav["Spill Rate"] = 1.0
-        df_pav["Constrained Yield (cent, km)"] = 0
+    # Extract route info
+    df_pav["Departure Airport"] = df_pav["O"].astype(str).str.strip()
+    df_pav["Arrival Airport"] = df_pav["D"].astype(str).str.strip()
+    df_pav["AF"] = df_pav["Departure Airport"] + df_pav["Arrival Airport"]
+    df_pav["ScenarioLabel"] = "Pavlina Assumptions"
 
-        for col in df_raw.columns:
-            if col not in df_pav.columns:
-                df_pav[col] = np.nan
-        df_pav = df_pav[df_raw.columns]
+    # Assign essential fields
+    df_pav["Distance (mi)"] = pd.to_numeric(df_pav["SL"], errors="coerce")
+    df_pav["ASM"] = pd.to_numeric(df_pav["Added ASMs"], errors="coerce")
+    df_pav["Unconstrained O&D Revenue"] = pd.to_numeric(df_pav["Added ASMs * TRASM"], errors="coerce")
+    df_pav["Constrained Segment Revenue"] = 0
+    df_pav["Constrained Segment Pax"] = 0
+    df_pav["Seats"] = 1
+    df_pav["Cut"] = 0
+    df_pav["Day of Week"] = 1
+    df_pav["Hub (nested)"] = "P2P"
+    df_pav["Spill Rate"] = 1.0
+    df_pav["Constrained Yield (cent, km)"] = 0
 
-        df_raw = pd.concat([df_raw, df_pav], ignore_index=True)
+    # Conform to df_raw columns
+    for col in df_raw.columns:
+        if col not in df_pav.columns:
+            df_pav[col] = np.nan
+    df_pav = df_pav[df_raw.columns]
 
-    except Exception as e:
-        st.warning(f"⚠️ Failed to load or process Pavlina file (root_2.xlsx): {e}")
+    df_raw = pd.concat([df_raw, df_pav], ignore_index=True)
+
+except Exception as e:
+    st.warning(f"⚠️ Failed to load or process Pavlina file (root_3.xlsx): {e}")
+
 
     # --- 🧮 Engineering ---
     df_raw["AF"] = df_raw["AF"].astype(str)
