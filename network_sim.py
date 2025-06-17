@@ -10,12 +10,16 @@ HUBS = ["DTW", "LAS", "FLL", "MCO", "MSY", "MYR", "ACY", "LGA"]
 
 # Load and tag scenarios
 def load_scenario(filepath, label):
-    df = pd.read_excel(filepath, sheet_name="NET_in")
-    df.columns = [str(c).strip() for c in df.columns]
-    df.rename(columns={"Flight Number": "AF", "Departure Day": "Day of Week", "Dist mi": "Distance (mi)"}, inplace=True)
-    df["ScenarioLabel"] = label
-    df["Distance (mi)"] = pd.to_numeric(df["Distance (mi)"], errors="coerce")
-    return df
+    xls = pd.ExcelFile(filepath)
+    frames = []
+    for sheet in xls.sheet_names:
+        df = pd.read_excel(xls, sheet_name=sheet)
+        df.columns = [str(c).strip() for c in df.columns]
+        df.rename(columns={"Flight Number": "AF", "Departure Day": "Day of Week", "Dist mi": "Distance (mi)"}, inplace=True)
+        df["ScenarioLabel"] = f"{label}: {sheet}"
+        df["Distance (mi)"] = pd.to_numeric(df["Distance (mi)"], errors="coerce")
+        frames.append(df)
+    return pd.concat(frames, ignore_index=True)
 
 @st.cache_data
 def load_data():
@@ -50,9 +54,9 @@ def filter_hub(df):
     return df[df["Hub"] == selected_hub]
 
 # Compare route sets
-df_base = filter_hub(df_raw[df_raw["ScenarioLabel"] == "Base"])
-df_asg = filter_hub(df_raw[df_raw["ScenarioLabel"] == "ASG"])
-df_spirit = filter_hub(df_raw[df_raw["ScenarioLabel"] == "Spirit"])
+df_base = filter_hub(df_raw[df_raw["ScenarioLabel"].str.startswith("Base")])
+df_asg = filter_hub(df_raw[df_raw["ScenarioLabel"].str.startswith("ASG")])
+df_spirit = filter_hub(df_raw[df_raw["ScenarioLabel"].str.startswith("Spirit")])
 
 routes_base = set(df_base["AF"])
 routes_asg = set(df_asg["AF"])
