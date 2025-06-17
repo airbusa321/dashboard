@@ -49,7 +49,6 @@ try:
     if "Distance (mi)" not in df_raw.columns and "Dist mi" in df_raw.columns:
         df_raw["Distance (mi)"] = df_raw["Dist mi"]
 
-    # Load Pavlina
     try:
         df_pav = pd.read_excel(pavlina_path)
         df_pav.columns = [str(c).strip() for c in df_pav.columns]
@@ -177,6 +176,9 @@ try:
 
         df_a = df_raw[df_raw["ScenarioLabel"] == scenario_a].copy()
         df_b = df_raw[df_raw["ScenarioLabel"] == scenario_b].copy()
+
+        df_a = df_a.drop_duplicates(subset=["AF"])
+        df_b = df_b.drop_duplicates(subset=["AF"])
 
         af_a = set(df_a["AF"])
         af_b = set(df_b["AF"])
