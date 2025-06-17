@@ -6,7 +6,6 @@ st.set_page_config(page_title="Spirit Network Strategy Dashboard", layout="wide"
 st.title("🛫 Spirit Airlines Network Planning Dashboard")
 st.caption("*All dollar and ASM values shown in thousands")
 
-# Load base data
 file_path = "root_data.xlsx"
 pavlina_path = "root_3.xlsx"
 
@@ -34,43 +33,39 @@ try:
         "Cut": "Cut"
     }, inplace=True)
 
-    # --- ✅ Pavlina assumptions integration ---
-try:
-    df_pav = pd.read_excel("root_3.xlsx")
-    df_pav.columns = [str(c).strip() for c in df_pav.columns]
+    # ✅ Pavlina assumptions integration
+    try:
+        df_pav = pd.read_excel(pavlina_path)
+        df_pav.columns = [str(c).strip() for c in df_pav.columns]
 
-    # Extract route info
-    df_pav["Departure Airport"] = df_pav["O"].astype(str).str.strip()
-    df_pav["Arrival Airport"] = df_pav["D"].astype(str).str.strip()
-    df_pav["AF"] = df_pav["Departure Airport"] + df_pav["Arrival Airport"]
-    df_pav["ScenarioLabel"] = "Pavlina Assumptions"
+        df_pav["Departure Airport"] = df_pav["O"].astype(str).str.strip()
+        df_pav["Arrival Airport"] = df_pav["D"].astype(str).str.strip()
+        df_pav["AF"] = df_pav["Departure Airport"] + df_pav["Arrival Airport"]
+        df_pav["ScenarioLabel"] = "Pavlina Assumptions"
 
-    # Assign essential fields
-    df_pav["Distance (mi)"] = pd.to_numeric(df_pav["SL"], errors="coerce")
-    df_pav["ASM"] = pd.to_numeric(df_pav["Added ASMs"], errors="coerce")
-    df_pav["Unconstrained O&D Revenue"] = pd.to_numeric(df_pav["Added ASMs * TRASM"], errors="coerce")
-    df_pav["Constrained Segment Revenue"] = 0
-    df_pav["Constrained Segment Pax"] = 0
-    df_pav["Seats"] = 1
-    df_pav["Cut"] = 0
-    df_pav["Day of Week"] = 1
-    df_pav["Hub (nested)"] = "P2P"
-    df_pav["Spill Rate"] = 1.0
-    df_pav["Constrained Yield (cent, km)"] = 0
+        df_pav["Distance (mi)"] = pd.to_numeric(df_pav["SL"], errors="coerce")
+        df_pav["ASM"] = pd.to_numeric(df_pav["Added ASMs"], errors="coerce")
+        df_pav["Unconstrained O&D Revenue"] = pd.to_numeric(df_pav["Added ASMs * TRASM"], errors="coerce")
+        df_pav["Constrained Segment Revenue"] = 0
+        df_pav["Constrained Segment Pax"] = 0
+        df_pav["Seats"] = 1
+        df_pav["Cut"] = 0
+        df_pav["Day of Week"] = 1
+        df_pav["Hub (nested)"] = "P2P"
+        df_pav["Spill Rate"] = 1.0
+        df_pav["Constrained Yield (cent, km)"] = 0
 
-    # Conform to df_raw columns
-    for col in df_raw.columns:
-        if col not in df_pav.columns:
-            df_pav[col] = np.nan
-    df_pav = df_pav[df_raw.columns]
+        for col in df_raw.columns:
+            if col not in df_pav.columns:
+                df_pav[col] = np.nan
+        df_pav = df_pav[df_raw.columns]
 
-    df_raw = pd.concat([df_raw, df_pav], ignore_index=True)
+        df_raw = pd.concat([df_raw, df_pav], ignore_index=True)
 
-except Exception as e:
-    st.warning(f"⚠️ Failed to load or process Pavlina file (root_3.xlsx): {e}")
+    except Exception as e:
+        st.warning(f"⚠️ Failed to load or process Pavlina file (root_3.xlsx): {e}")
 
-
-    # --- 🧮 Engineering ---
+    # 🧮 Engineering
     df_raw["AF"] = df_raw["AF"].astype(str)
     df_raw["ASM"] = df_raw["Seats"] * df_raw["Distance (mi)"]
     df_raw["NetworkType"] = df_raw["Hub (nested)"].apply(
@@ -83,7 +78,6 @@ except Exception as e:
 
     df_raw["RouteID"] = df_raw["ScenarioLabel"] + ":" + df_raw["AF"]
 
-    # Stage-length adjusted yields
     df_raw["Raw Yield (¢/mi)"] = df_raw["Constrained Yield (cent, km)"] * 1.60934
     log_lengths = np.log(df_raw["Distance (mi)"] + 1)
     coeffs = np.polyfit(log_lengths.fillna(0), df_raw["Raw Yield (¢/mi)"].fillna(0), 1)
@@ -115,7 +109,7 @@ except Exception as e:
     min_score = df_raw["Raw Usefulness"].min()
     df_raw["Usefulness"] = df_raw["Raw Usefulness"] - min_score if min_score < 0 else df_raw["Raw Usefulness"]
 
-    # --- Display ---
+    # Display
     st.markdown("""
     ### ℹ️ Usefulness Score Definition
     This metric combines:
