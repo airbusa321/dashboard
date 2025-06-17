@@ -16,41 +16,20 @@ def compute_rrs(df,
                 yield_col='Constrained Yield (cent, km)',
                 lf_col='Load Factor',
                 spill_col='Spill Rate',
-                market_avg_fare=11.0):  # You can adjust this benchmark
-
-    # Ensure numeric conversion
+                market_avg_fare=11.0):
     for col in [cost_col, profit_col, asm_col, yield_col, lf_col, spill_col]:
         df[col] = pd.to_numeric(df[col], errors='coerce')
-
-    # Cost per ASM
     df['CASM (cent)'] = df[cost_col] / df[asm_col]
-
-    # Break-even Load Factor
     df['BELF'] = df['CASM (cent)'] / df[yield_col].replace(0, np.nan)
-
-    # Load Factor metrics
     df['LF_decimal'] = df[lf_col] / 100
     df['LF_minus_BELF'] = df['LF_decimal'] - df['BELF']
-
-    # Adjust for competition/spill
     df['Spill_Adjusted'] = 1 - df[spill_col].replace(1, np.nan)
-
-    # Profit per ASM (convert from thousands)
     df['Profit_per_ASM'] = df[profit_col] / (df[asm_col] * 1000)
-
-    # Base RRS calculation (scaled up)
     df['RRS_simplified'] = (df['LF_minus_BELF'] / df['Spill_Adjusted']) * df['Profit_per_ASM'] * 10000
-
-    # Fare Premium vs. market average
     df['Fare_Premium'] = df[yield_col] / market_avg_fare
-
-    # Final RRS
     df['RRS'] = df['RRS_simplified'] * df['Fare_Premium']
-
     return df
 
-
-# ---- Load and Process Data ----
 try:
     xlsx = pd.ExcelFile(file_path)
     if "NET_in" not in xlsx.sheet_names:
@@ -75,7 +54,6 @@ try:
         "Cut": "Cut"
     }, inplace=True)
 
-    # ---- Pavlina assumptions integration ----
     try:
         df_pav = pd.read_excel(pavlina_path)
         df_pav.columns = [str(c).strip() for c in df_pav.columns]
@@ -92,9 +70,12 @@ try:
         df_pav["Seats"] = 1
         df_pav["Cut"] = 0
         df_pav["Day of Week"] = 1
-        df_pav["Hub (nested)"] = "P2P"
         df_pav["Spill Rate"] = 1.0
         df_pav["Constrained Yield (cent, km)"] = 0
+
+        df_pav["Hub (nested)"] = df_pav["O"].apply(
+            lambda x: str(x).strip() if str(x).strip() in ["FLL", "LAS", "DTW", "MCO"] else "P2P"
+        )
 
         for col in df_raw.columns:
             if col not in df_pav.columns:
@@ -105,7 +86,6 @@ try:
     except Exception as e:
         st.warning(f"⚠️ Failed to load or process Pavlina file (root_3.xlsx): {e}")
 
-    # ---- Engineering Metrics ----
     df_raw["AF"] = df_raw["AF"].astype(str)
     df_raw["ASM"] = df_raw["ASM"].combine_first(df_raw["Seats"] * df_raw["Distance (mi)"])
     df_raw["NetworkType"] = df_raw["Hub (nested)"].apply(lambda h: h.strip() if str(h).strip() in ["FLL", "LAS", "DTW", "MCO"] else "P2P")
@@ -144,10 +124,8 @@ try:
     min_score = df_raw["Raw Usefulness"].min()
     df_raw["Usefulness"] = df_raw["Raw Usefulness"] - min_score if min_score < 0 else df_raw["Raw Usefulness"]
 
-    # ---- Compute RRS ----
     df_raw = compute_rrs(df_raw)
 
-    # ---- Display ----
     st.markdown("""
     ### ℹ️ Usefulness Score & Route Resilience
     This metric combines:
