@@ -81,30 +81,6 @@ try:
         df_pav = df_pav[df_raw.columns]
         df_raw = pd.concat([df_raw, df_pav], ignore_index=True)
 
-        df_base_lookup = (
-            df_raw[df_raw["ScenarioLabel"] != "Pavlina Assumptions"]
-            .sort_values("ScenarioLabel")
-            .drop_duplicates(subset=["AF"])
-            .set_index("AF")
-        )
-
-        fallback_cols = [
-            "Constrained Segment Pax",
-            "Constrained Segment Revenue",
-            "Load Factor",
-            "Constrained Yield (cent, km)",
-            "RASM",
-            "TRASM",
-            "Raw Yield (¢/mi)",
-        ]
-
-        pav_mask = df_raw["ScenarioLabel"] == "Pavlina Assumptions"
-        for col in fallback_cols:
-            fallback_series = df_raw.loc[pav_mask, "AF"].map(df_base_lookup[col])
-            original = df_raw.loc[pav_mask, col]
-            updated = original.mask((original.isna() | (original == 0)) & fallback_series.notna(), fallback_series)
-            df_raw.loc[pav_mask, col] = updated
-
     except Exception as e:
         st.warning(f"⚠️ Failed to load or process Pavlina file (root_3.xlsx): {e}")
 
@@ -124,6 +100,35 @@ try:
     df_raw["Load Factor"] = df_raw["RPM"] / df_raw["ASM"] * 100
     df_raw["RASM"] = df_raw["Constrained Segment Revenue"] / df_raw["ASM"] * 100
     df_raw["TRASM"] = df_raw["Unconstrained O&D Revenue"] / df_raw["ASM"] * 100
+
+    df_base_lookup = (
+        df_raw[df_raw["ScenarioLabel"] != "Pavlina Assumptions"]
+        .sort_values("ScenarioLabel")
+        .drop_duplicates(subset=["AF"])
+        .set_index("AF")
+    )
+
+    fallback_cols = [
+        "Constrained Segment Pax",
+        "Constrained Segment Revenue",
+        "Load Factor",
+        "Constrained Yield (cent, km)",
+        "RASM",
+        "TRASM",
+        "Raw Yield (¢/mi)"
+    ]
+
+    pav_mask = df_raw["ScenarioLabel"] == "Pavlina Assumptions"
+    df_raw.loc[pav_mask, "AF_from_Market"] = (
+        df_raw.loc[pav_mask, "Departure Airport"].astype(str).str.strip() +
+        df_raw.loc[pav_mask, "Arrival Airport"].astype(str).str.strip()
+    )
+
+    for col in fallback_cols:
+        fallback_series = df_raw.loc[pav_mask, "AF_from_Market"].map(df_base_lookup[col])
+        original = df_raw.loc[pav_mask, col]
+        updated = original.mask((original.isna() | (original == 0)) & fallback_series.notna(), fallback_series)
+        df_raw.loc[pav_mask, col] = updated
 
     df_raw["Elasticity"] = df_raw.apply(
         lambda row: 1.2 if row["Constrained Segment Pax"] > 1.1 * row["Seats"] * 0.7 else 1.0,
