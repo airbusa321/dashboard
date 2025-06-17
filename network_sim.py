@@ -9,7 +9,6 @@ st.caption("*All dollar and ASM values shown in thousands")
 file_path = "root_data.xlsx"
 pavlina_path = "root_3.xlsx"
 
-# ---- Route Resilience Score (RRS) function ----
 def compute_rrs(df, 
                 cost_col='Costs1', 
                 profit_col='Profit1', 
@@ -17,21 +16,39 @@ def compute_rrs(df,
                 yield_col='Constrained Yield (cent, km)',
                 lf_col='Load Factor',
                 spill_col='Spill Rate',
-                market_avg_fare=11.0):
+                market_avg_fare=11.0):  # You can adjust this benchmark
 
+    # Ensure numeric conversion
     for col in [cost_col, profit_col, asm_col, yield_col, lf_col, spill_col]:
         df[col] = pd.to_numeric(df[col], errors='coerce')
 
+    # Cost per ASM
     df['CASM (cent)'] = df[cost_col] / df[asm_col]
+
+    # Break-even Load Factor
     df['BELF'] = df['CASM (cent)'] / df[yield_col].replace(0, np.nan)
+
+    # Load Factor metrics
     df['LF_decimal'] = df[lf_col] / 100
     df['LF_minus_BELF'] = df['LF_decimal'] - df['BELF']
+
+    # Adjust for competition/spill
     df['Spill_Adjusted'] = 1 - df[spill_col].replace(1, np.nan)
+
+    # Profit per ASM (convert from thousands)
     df['Profit_per_ASM'] = df[profit_col] / (df[asm_col] * 1000)
-    df['RRS_simplified'] = (df['LF_minus_BELF'] / df['Spill_Adjusted']) * df['Profit_per_ASM']
+
+    # Base RRS calculation (scaled up)
+    df['RRS_simplified'] = (df['LF_minus_BELF'] / df['Spill_Adjusted']) * df['Profit_per_ASM'] * 10000
+
+    # Fare Premium vs. market average
     df['Fare_Premium'] = df[yield_col] / market_avg_fare
+
+    # Final RRS
     df['RRS'] = df['RRS_simplified'] * df['Fare_Premium']
+
     return df
+
 
 # ---- Load and Process Data ----
 try:
