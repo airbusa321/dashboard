@@ -8,7 +8,7 @@ st.caption("*All dollar and ASM values shown in thousands")
 
 # Load base data
 file_path = "root_data.xlsx"
-pavlina_path = "root_2.xlsx"
+pavlina_path = "root_3.xlsx"
 
 try:
     xlsx = pd.ExcelFile(file_path)
