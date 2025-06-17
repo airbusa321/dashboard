@@ -128,7 +128,7 @@ try:
 
         st.subheader(f"📊 Summary by Hub — {selected_scenario}")
         hub_summary = df_filtered.groupby("NetworkType").apply(lambda g: pd.Series({
-            "Weekly Departures": g.shape[0],
+            "Weekly Departures": g.shape[0] * 7 if g["ScenarioLabel"].iloc[0] == "Pavlina Assumptions" else g.shape[0],
             "ASMs (M)": g["ASM"].sum() / 1_000_000
         })).reset_index().rename(columns={"NetworkType": "Hub"})
 
@@ -136,7 +136,7 @@ try:
 
         st.subheader("📊 System-Level Summary")
         system_summary = df_raw.groupby("ScenarioLabel").apply(lambda g: pd.Series({
-            "Weekly Departures": g.shape[0],
+            "Weekly Departures": g.shape[0] * 7 if g["ScenarioLabel"].iloc[0] == "Pavlina Assumptions" else g.shape[0],
             "ASMs (M)": g["ASM"].sum() / 1_000_000
         })).reset_index().rename(columns={"ScenarioLabel": "Scenario"})
 
