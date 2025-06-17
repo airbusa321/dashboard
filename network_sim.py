@@ -8,7 +8,6 @@ st.caption("*All dollar and ASM values shown in thousands")
 
 HUBS = ["DTW", "LAS", "FLL", "MCO", "MSY", "MYR", "ACY", "LGA"]
 
-# Load and tag scenarios
 @st.cache_data
 def load_data():
     xls = pd.ExcelFile("root_data.xlsx")
@@ -16,10 +15,19 @@ def load_data():
     for sheet in xls.sheet_names:
         df = pd.read_excel(xls, sheet_name=sheet)
         df.columns = [str(c).strip() for c in df.columns]
-        df.rename(columns={"Flight Number": "AF", "Departure Day": "Day of Week", "Dist mi": "Distance (mi)"}, inplace=True)
+
+        df.rename(columns={
+            "Flight Number": "AF",
+            "Departure Day": "Day of Week",
+            "Dist mi": "Distance (mi)"
+        }, inplace=True)
+
+        df["ScenarioLabel"] = sheet
         if "Distance (mi)" not in df.columns:
             df["Distance (mi)"] = np.nan
-        df["ScenarioLabel"] = sheet
+        if "Hub (nested)" not in df.columns:
+            df["Hub (nested)"] = "P2P"
+
         df["Distance (mi)"] = pd.to_numeric(df["Distance (mi)"], errors="coerce")
         frames.append(df)
     return pd.concat(frames, ignore_index=True)
