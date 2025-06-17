@@ -25,7 +25,6 @@ def load_data():
     df["Distance (mi)"] = pd.to_numeric(df.get("Distance (mi)"), errors="coerce")
     df["Seats"] = pd.to_numeric(df.get("Seats", 1), errors="coerce")
     df["ASM"] = pd.to_numeric(df.get("ASM", df["Seats"] * df["Distance (mi)"]), errors="coerce")
-
     df["Constrained Yield (cent, km)"] = pd.to_numeric(df.get("Constrained Yield (cent, km)"), errors="coerce")
     df["Constrained RASK (cent)"] = pd.to_numeric(df.get("Constrained RASK (cent)"), errors="coerce")
     df["Load Factor"] = pd.to_numeric(df["Load Factor"].astype(str).str.replace("%", ""), errors="coerce")
@@ -41,7 +40,6 @@ def load_data():
     df = df.merge(days_op, on=["ScenarioLabel", "RouteID"], how="left")
     df["Low Frequency"] = df["Days Operated"] <= 2
 
-    # Connecting traffic yield comparison
     df["Connect Yield"] = df["Constrained Connect Fare"] / df["Constrained Segment Pax"]
     df["Connect vs O-D Yield Ratio"] = df["Connect Yield"] / df["Constrained Local Fare"]
 
@@ -49,12 +47,17 @@ def load_data():
 
 df_raw = load_data()
 
+# Sidebar controls
 available_scenarios = sorted(df_raw["ScenarioLabel"].dropna().unique())
 base_scenario = st.sidebar.selectbox("Select BASE Scenario", available_scenarios)
 comparison_scenarios = st.sidebar.multiselect(
     "Select COMPARISON Scenario(s)", [s for s in available_scenarios if s != base_scenario]
 )
 
+hub_options = ["System-wide"] + HUBS + ["P2P"]
+selected_hub = st.sidebar.selectbox("Filter by Hub", hub_options)
+
+# Helper: clean label for display
 def clean_label(label):
     if "(" in label:
         return label.split("(")[0].strip()
@@ -62,13 +65,20 @@ def clean_label(label):
         return label.split(":")[0].strip()
     return label.strip()
 
+# Hub filtering function
+def filter_by_hub(df):
+    if selected_hub == "System-wide":
+        return df
+    return df[df["Hub"] == selected_hub]
+
+# Core comparison logic
 if comparison_scenarios:
-    df_base = df_raw[df_raw["ScenarioLabel"] == base_scenario]
+    df_base = filter_by_hub(df_raw[df_raw["ScenarioLabel"] == base_scenario])
     routes_base = set(df_base["RouteID"])
     clean_base = clean_label(base_scenario)
 
     for comp in comparison_scenarios:
-        df_comp = df_raw[df_raw["ScenarioLabel"] == comp]
+        df_comp = filter_by_hub(df_raw[df_raw["ScenarioLabel"] == comp])
         routes_comp = set(df_comp["RouteID"])
         clean_comp = clean_label(comp)
 
@@ -92,3 +102,15 @@ if comparison_scenarios:
 
 else:
     st.info("Select at least one comparison scenario to begin analysis.")
+
+# ASM Totals
+st.markdown("### 📊 **ASM Totals by Scenario**")
+asm_summary = (
+    df_raw.groupby("ScenarioLabel")["ASM"]
+    .sum()
+    .div(1_000_000)
+    .reset_index()
+    .rename(columns={"ASM": "Total ASM (M)"})
+    .sort_values("Total ASM (M)", ascending=False)
+)
+st.dataframe(asm_summary, use_container_width=True)
