@@ -30,13 +30,14 @@ def load_data():
 def preprocess(df):
     df = df.copy()
     df["AF"] = df["AF"].astype(str)
+    df["RouteID"] = df["Departure Airport"].astype(str) + ":" + df["Arrival Airport"].astype(str)
     df["Seats"] = df.get("Seats", 1)
     df["ASM"] = df.get("ASM", df["Seats"] * df["Distance (mi)"])
     df["Hub"] = df["Hub (nested)"].apply(lambda h: str(h).strip() if str(h).strip() in HUBS else "P2P")
-    days_op = df.groupby(["ScenarioLabel", "AF"])["Day of Week"].nunique().clip(upper=7).reset_index()
-    days_op.columns = ["ScenarioLabel", "AF", "Days Operated"]
-    df = df.merge(days_op, on=["ScenarioLabel", "AF"], how="left")
-    df = df.drop_duplicates(subset=["ScenarioLabel", "AF"])
+    days_op = df.groupby(["ScenarioLabel", "RouteID"])["Day of Week"].nunique().clip(upper=7).reset_index()
+    days_op.columns = ["ScenarioLabel", "RouteID", "Days Operated"]
+    df = df.merge(days_op, on=["ScenarioLabel", "RouteID"], how="left")
+    df = df.drop_duplicates(subset=["ScenarioLabel", "RouteID"])
     df["Low Frequency"] = df["Days Operated"] <= 2
     return df
 
@@ -62,9 +63,9 @@ df_base = filter_hub(df_raw[df_raw["ScenarioLabel"] == base_label])
 df_asg = filter_hub(df_raw[df_raw["ScenarioLabel"] == asg_label])
 df_spirit = filter_hub(df_raw[df_raw["ScenarioLabel"] == spirit_label])
 
-routes_base = set(df_base["AF"])
-routes_asg = set(df_asg["AF"])
-routes_spirit = set(df_spirit["AF"])
+routes_base = set(df_base["RouteID"])
+routes_asg = set(df_asg["RouteID"])
+routes_spirit = set(df_spirit["RouteID"])
 
 only_asg = routes_asg - routes_spirit - routes_base
 only_spirit = routes_spirit - routes_asg - routes_base
@@ -73,19 +74,19 @@ only_base = routes_base - routes_asg - routes_spirit
 wide_col1, wide_col2 = st.columns([3, 3])
 with wide_col1:
     st.subheader(f"✈️ Routes in {asg_label} but not in {spirit_label} or {base_label}")
-    st.dataframe(df_asg[df_asg["AF"].isin(only_asg)][[
-        "AF", "Departure Airport", "Arrival Airport", "Days Operated", "ASM", "RASM", "TRASM", "Usefulness", "RRS", "Cut", "Low Frequency"
+    st.dataframe(df_asg[df_asg["RouteID"].isin(only_asg)][[
+        "RouteID", "Departure Airport", "Arrival Airport", "Days Operated", "ASM", "Cut", "Low Frequency"
     ]], use_container_width=True)
 
 with wide_col2:
     st.subheader(f"✈️ Routes in {spirit_label} but not in {asg_label} or {base_label}")
-    st.dataframe(df_spirit[df_spirit["AF"].isin(only_spirit)][[
-        "AF", "Departure Airport", "Arrival Airport", "Days Operated", "ASM", "RASM", "TRASM", "Usefulness", "RRS", "Cut", "Low Frequency"
+    st.dataframe(df_spirit[df_spirit["RouteID"].isin(only_spirit)][[
+        "RouteID", "Departure Airport", "Arrival Airport", "Days Operated", "ASM", "Cut", "Low Frequency"
     ]], use_container_width=True)
 
 st.subheader(f"✈️ Routes in {base_label} but not in {asg_label} or {spirit_label}")
-st.dataframe(df_base[df_base["AF"].isin(only_base)][[
-    "AF", "Departure Airport", "Arrival Airport", "Days Operated", "ASM", "RASM", "TRASM", "Usefulness", "RRS", "Cut", "Low Frequency"
+st.dataframe(df_base[df_base["RouteID"].isin(only_base)][[
+    "RouteID", "Departure Airport", "Arrival Airport", "Days Operated", "ASM", "Cut", "Low Frequency"
 ]], use_container_width=True)
 
 # Validation Metrics Summary
@@ -101,7 +102,7 @@ Metrics reflect:
 st.subheader("🧮 System-Level Validation Summary")
 system_summary = df_raw.groupby("ScenarioLabel").agg({
     "ASM": lambda x: x.sum() / 1_000_000,
-    "AF": "nunique",
+    "RouteID": "nunique",
     "Days Operated": "mean"
-}).reset_index().rename(columns={"ASM": "Total ASMs (M)", "AF": "Route Count", "Days Operated": "Avg Days Operated per Route"})
+}).reset_index().rename(columns={"ASM": "Total ASMs (M)", "RouteID": "Route Count", "Days Operated": "Avg Days Operated per Route"})
 st.dataframe(system_summary, use_container_width=True)
