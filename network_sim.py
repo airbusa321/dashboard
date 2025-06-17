@@ -2,199 +2,98 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 
-st.set_page_config(page_title="Spirit Network Strategy Dashboard", layout="wide")
-st.title("🛫 Spirit Airlines Network Planning Dashboard")
+st.set_page_config(page_title="Route Comparison Dashboard", layout="wide")
+st.title("✈️ Route Comparison: ASG vs Spirit vs Base")
 st.caption("*All dollar and ASM values shown in thousands")
 
-file_path = "root_data.xlsx"
-pavlina_path = "root_3.xlsx"
+HUBS = ["DTW", "LAS", "FLL", "MCO", "MSY", "MYR", "ACY", "LGA"]
 
-def compute_rrs(df, 
-                cost_col='Costs1', 
-                profit_col='Profit1', 
-                asm_col='ASM',
-                yield_col='Constrained Yield (cent, km)',
-                lf_col='Load Factor',
-                spill_col='Spill Rate',
-                market_avg_fare=11.0):
-    for col in [cost_col, profit_col, asm_col, yield_col, lf_col, spill_col]:
-        df[col] = pd.to_numeric(df[col], errors='coerce')
-    df['CASM (cent)'] = df[cost_col] / df[asm_col]
-    df['BELF'] = df['CASM (cent)'] / df[yield_col].replace(0, np.nan)
-    df['LF_decimal'] = df[lf_col] / 100
-    df['LF_minus_BELF'] = df['LF_decimal'] - df['BELF']
-    df['Spill_Adjusted'] = 1 - df[spill_col].replace(1, np.nan)
-    df['Profit_per_ASM'] = df[profit_col] / (df[asm_col] * 1000)
-    df['RRS_simplified'] = (df['LF_minus_BELF'] / df['Spill_Adjusted']) * df['Profit_per_ASM'] * 10000
-    df['Fare_Premium'] = df[yield_col] / market_avg_fare
-    df['RRS'] = df['RRS_simplified'] * df['Fare_Premium']
+# Load and tag scenarios
+def load_scenario(filepath, label):
+    df = pd.read_excel(filepath, sheet_name="NET_in")
+    df.columns = [str(c).strip() for c in df.columns]
+    df.rename(columns={"Flight Number": "AF", "Departure Day": "Day of Week", "Dist mi": "Distance (mi)"}, inplace=True)
+    df["ScenarioLabel"] = label
+    df["Distance (mi)"] = pd.to_numeric(df["Distance (mi)"], errors="coerce")
     return df
 
-try:
-    df_raw = pd.read_excel(file_path, sheet_name="NET_in")
-    df_raw.columns = [str(c).strip() for c in df_raw.columns]
+@st.cache_data
+def load_data():
+    base = load_scenario("root_data.xlsx", "Base")
+    asg = load_scenario("root_1.xlsx", "ASG")
+    spirit = load_scenario("root_2.xlsx", "Spirit")
+    return pd.concat([base, asg, spirit], ignore_index=True)
 
-    df_raw.rename(columns={
-        "Flight Number": "AF",
-        "Departure Day": "Day of Week",
-        "Hub (nested)": "Hub (nested)",
-        "Distance (km)": "Distance (km)",
-        "Constrained Segment Pax": "Constrained Segment Pax",
-        "Constrained Segment Revenue": "Constrained Segment Revenue",
-        "Unconstrained O&D Revenue": "Unconstrained O&D Revenue",
-        "ScenarioLabel": "ScenarioLabel",
-        "Cut": "Cut"
-    }, inplace=True)
-
-    if "Distance (mi)" not in df_raw.columns and "Dist mi" in df_raw.columns:
-        df_raw["Distance (mi)"] = df_raw["Dist mi"]
-
-    try:
-        df_pav = pd.read_excel(pavlina_path)
-        df_pav.columns = [str(c).strip() for c in df_pav.columns]
-
-        df_pav["Departure Airport"] = df_pav["O"].apply(lambda x: str(x).strip())
-        df_pav["Arrival Airport"] = df_pav["D"].apply(lambda x: str(x).strip())
-        df_pav["AF"] = df_pav["Departure Airport"] + df_pav["Arrival Airport"]
-        df_pav["ScenarioLabel"] = "Pavlina Assumptions"
-        df_pav["Distance (mi)"] = pd.to_numeric(df_pav["SL"], errors="coerce")
-        df_pav["ASM"] = pd.to_numeric(df_pav["Added ASMs"], errors="coerce")
-        df_pav["Unconstrained O&D Revenue"] = pd.to_numeric(df_pav["Added ASMs * TRASM"], errors="coerce")
-        df_pav["Constrained Segment Revenue"] = 0
-        df_pav["Constrained Segment Pax"] = 0
-        df_pav["Seats"] = 1
-        df_pav["Cut"] = 0
-        df_pav["Day of Week"] = 1
-        df_pav["Spill Rate"] = 1.0
-        df_pav["Constrained Yield (cent, km)"] = 0
-        df_pav["Hub (nested)"] = df_pav["O"].apply(lambda x: str(x).strip() if str(x).strip() in ["FLL", "LAS", "DTW", "MCO"] else "P2P")
-
-        for col in df_raw.columns:
-            if col not in df_pav.columns:
-                df_pav[col] = np.nan
-        df_pav = df_pav[df_raw.columns]
-        df_raw = pd.concat([df_raw, df_pav], ignore_index=True)
-    except Exception as e:
-        st.warning(f"⚠️ Failed to load or process Pavlina file: {e}")
-
-    df_raw["AF"] = df_raw["AF"].astype(str)
-    df_raw["ASM"] = df_raw["ASM"].combine_first(df_raw["Seats"] * df_raw["Distance (mi)"])
-    df_raw["NetworkType"] = df_raw["Hub (nested)"].apply(lambda h: str(h).strip() if str(h).strip() in ["FLL", "LAS", "DTW", "MCO"] else "P2P")
-
-    days_op = df_raw.groupby(["ScenarioLabel", "AF"])["Day of Week"].nunique().clip(upper=7).reset_index()
+def preprocess(df):
+    df = df.copy()
+    df["AF"] = df["AF"].astype(str)
+    df["Seats"] = df.get("Seats", 1)
+    df["ASM"] = df.get("ASM", df["Seats"] * df["Distance (mi)"])
+    df["Hub"] = df["Hub (nested)"].apply(lambda h: str(h).strip() if str(h).strip() in HUBS else "P2P")
+    days_op = df.groupby(["ScenarioLabel", "AF"])["Day of Week"].nunique().clip(upper=7).reset_index()
     days_op.columns = ["ScenarioLabel", "AF", "Days Operated"]
-    df_raw = df_raw.merge(days_op, on=["ScenarioLabel", "AF"], how="left")
+    df = df.merge(days_op, on=["ScenarioLabel", "AF"], how="left")
+    df = df.drop_duplicates(subset=["ScenarioLabel", "AF"])
+    df["Low Frequency"] = df["Days Operated"] <= 2
+    return df
 
-    df_raw["RPM"] = df_raw["Constrained Segment Pax"] * df_raw["Distance (mi)"]
-    df_raw["Load Factor"] = df_raw["RPM"] / df_raw["ASM"] * 100
-    df_raw["RASM"] = df_raw["Constrained Segment Revenue"] / df_raw["ASM"] * 100
-    df_raw["TRASM"] = df_raw["Unconstrained O&D Revenue"] / df_raw["ASM"] * 100
+# Load and preprocess
+df_raw = preprocess(load_data())
 
-    df_raw["Elasticity"] = df_raw.apply(
-        lambda row: 1.2 if row["Constrained Segment Pax"] > 1.1 * row["Seats"] * 0.7 else 1.0,
-        axis=1
-    )
+# Select hub
+selected_hub = st.selectbox("Select Hub", ["System-wide"] + HUBS, index=0)
 
-    valid_mask = (
-        df_raw["Distance (mi)"].notna() &
-        df_raw["Distance (mi)"] > 0 &
-        df_raw["TRASM"].notna() &
-        np.isfinite(df_raw["TRASM"])
-    )
+# Filter for hub
+def filter_hub(df):
+    if selected_hub == "System-wide":
+        return df.copy()
+    return df[df["Hub"] == selected_hub]
 
-    if valid_mask.sum() > 10:
-        log_stage = np.log(df_raw.loc[valid_mask, "Distance (mi)"])
-        trasm_vals = df_raw.loc[valid_mask, "TRASM"]
-        slope, intercept = np.polyfit(log_stage, trasm_vals, 1)
-        df_raw["Normalized TRASM"] = slope * np.log(df_raw["Distance (mi)"].fillna(1)) + intercept
-    else:
-        st.warning("⚠️ Not enough valid data to compute adjusted TRASM. Using raw TRASM.")
-        df_raw["Normalized TRASM"] = df_raw["TRASM"]
+# Compare route sets
+df_base = filter_hub(df_raw[df_raw["ScenarioLabel"] == "Base"])
+df_asg = filter_hub(df_raw[df_raw["ScenarioLabel"] == "ASG"])
+df_spirit = filter_hub(df_raw[df_raw["ScenarioLabel"] == "Spirit"])
 
-    df_raw["Raw Usefulness"] = (
-        (df_raw["TRASM"] - df_raw["Normalized TRASM"]) / df_raw["Normalized TRASM"]
-    ) * df_raw["Elasticity"] * (1 + 0.1 * df_raw["Spill Rate"])
-    min_score = df_raw["Raw Usefulness"].min()
-    df_raw["Usefulness"] = df_raw["Raw Usefulness"] - min_score if min_score < 0 else df_raw["Raw Usefulness"]
+routes_base = set(df_base["AF"])
+routes_asg = set(df_asg["AF"])
+routes_spirit = set(df_spirit["AF"])
 
-    df_raw = compute_rrs(df_raw)
+only_asg = routes_asg - routes_spirit - routes_base
+only_spirit = routes_spirit - routes_asg - routes_base
+only_base = routes_base - routes_asg - routes_spirit
 
-    st.markdown("""
-    ### ℹ️ Usefulness Score & Route Resilience
-    Metrics reflect:
-    - **Stage-Length-Adjusted TRASM**
-    - Adjusted for **Elasticity** and **Spill Rate**
-    - Plus: **Route Resilience Score (RRS)**
-    """)
+wide_col1, wide_col2 = st.columns([3, 3])
+with wide_col1:
+    st.subheader(f"✈️ Routes in ASG but not in Spirit or Base")
+    st.dataframe(df_asg[df_asg["AF"].isin(only_asg)][[
+        "AF", "Departure Airport", "Arrival Airport", "Days Operated", "ASM", "RASM", "TRASM", "Usefulness", "RRS", "Cut", "Low Frequency"
+    ]], use_container_width=True)
 
-    tab1, tab2, tab3 = st.tabs(["📊 Summary View", "🔍 Route Analysis", "📌 Scenario Comparison"])
+with wide_col2:
+    st.subheader(f"✈️ Routes in Spirit but not in ASG or Base")
+    st.dataframe(df_spirit[df_spirit["AF"].isin(only_spirit)][[
+        "AF", "Departure Airport", "Arrival Airport", "Days Operated", "ASM", "RASM", "TRASM", "Usefulness", "RRS", "Cut", "Low Frequency"
+    ]], use_container_width=True)
 
-    with tab1:
-        scenario_options = df_raw["ScenarioLabel"].dropna().unique().tolist()
-        selected_scenario = st.selectbox("Scenario", scenario_options, key="summary_scenario")
-        df_filtered = df_raw[df_raw["ScenarioLabel"] == selected_scenario].copy()
+st.subheader(f"✈️ Routes in Base but not in ASG or Spirit")
+st.dataframe(df_base[df_base["AF"].isin(only_base)][[
+    "AF", "Departure Airport", "Arrival Airport", "Days Operated", "ASM", "RASM", "TRASM", "Usefulness", "RRS", "Cut", "Low Frequency"
+]], use_container_width=True)
 
-        st.subheader(f"📊 Summary by Hub — {selected_scenario}")
-        hub_summary = df_filtered.groupby("NetworkType").agg({
-            "Days Operated": "sum",
-            "ASM": lambda x: x.sum() / 1_000_000
-        }).reset_index().rename(columns={"NetworkType": "Hub", "ASM": "ASMs (M)"})
-        st.dataframe(hub_summary, use_container_width=True)
+# Validation Metrics Summary
+st.markdown("""
+### ℹ️ Usefulness Score & Route Resilience
+Metrics reflect:
+- **Stage-Length-Adjusted TRASM**
+- Adjusted for **Elasticity** and **Spill Rate**
+- Plus: **Route Resilience Score (RRS)**
+""")
 
-        st.subheader("📊 System-Level Summary")
-        system_summary = df_raw.groupby("ScenarioLabel").agg({
-            "Days Operated": "sum",
-            "ASM": lambda x: x.sum() / 1_000_000
-        }).reset_index().rename(columns={"ScenarioLabel": "Scenario", "ASM": "ASMs (M)"})
-        st.dataframe(system_summary, use_container_width=True)
-
-    with tab2:
-        st.header("✈️ Route-Level Hub Analysis")
-        scenario_choice = st.selectbox("Select Scenario", scenario_options, key="route_scenario")
-        hub_choice = st.selectbox("Select Hub", ["DTW", "LAS", "FLL", "MCO", "P2P"], key="route_hub")
-        show_only_cut = st.checkbox("Show only cut routes")
-
-        df_view = df_raw[(df_raw["ScenarioLabel"] == scenario_choice) & (df_raw["NetworkType"] == hub_choice)].copy()
-        if show_only_cut:
-            df_view = df_view[df_view["Cut"] == 1]
-
-        df_view = df_view.drop_duplicates(subset=["ScenarioLabel", "AF"])
-        df_view = df_view.sort_values("Usefulness", ascending=False)
-        st.dataframe(df_view[[
-            "AF", "Departure Airport", "Arrival Airport", "ASM", "Days Operated", "RASM", "TRASM", "Load Factor",
-            "Constrained Segment Revenue", "Unconstrained O&D Revenue",
-            "Usefulness", "RRS", "Cut"
-        ]], use_container_width=True)
-
-    with tab3:
-        st.header("📌 Compare Routes Between Two Scenarios")
-        col1, col2 = st.columns(2)
-        with col1:
-            scenario_a = st.selectbox("Scenario A", scenario_options, key="compare_a")
-        with col2:
-            scenario_b = st.selectbox("Scenario B", scenario_options, key="compare_b")
-
-        df_a = df_raw[df_raw["ScenarioLabel"] == scenario_a].copy()
-        df_b = df_raw[df_raw["ScenarioLabel"] == scenario_b].copy()
-
-        df_a = df_a.drop_duplicates(subset=["AF"])
-        df_b = df_b.drop_duplicates(subset=["AF"])
-
-        af_a = set(df_a["AF"])
-        af_b = set(df_b["AF"])
-
-        only_in_a = af_a - af_b
-        only_in_b = af_b - af_a
-
-        st.subheader(f"✈️ Routes in **{scenario_a}** but not in **{scenario_b}**")
-        st.dataframe(df_a[df_a["AF"].isin(only_in_a)][[
-            "AF", "Departure Airport", "Arrival Airport", "Days Operated", "ASM", "RASM", "TRASM", "Usefulness", "RRS", "Cut"
-        ]], use_container_width=True)
-
-        st.subheader(f"✈️ Routes in **{scenario_b}** but not in **{scenario_a}**")
-        st.dataframe(df_b[df_b["AF"].isin(only_in_b)][[
-            "AF", "Departure Airport", "Arrival Airport", "Days Operated", "ASM", "RASM", "TRASM", "Usefulness", "RRS", "Cut"
-        ]], use_container_width=True)
-
-except Exception as e:
-    st.error(f"Failed to load or process data: {e}")
+# Validation Summary Table
+st.subheader("🧮 System-Level Validation Summary")
+system_summary = df_raw.groupby("ScenarioLabel").agg({
+    "ASM": lambda x: x.sum() / 1_000_000,
+    "AF": "nunique",
+    "Days Operated": "mean"
+}).reset_index().rename(columns={"ASM": "Total ASMs (M)", "AF": "Route Count", "Days Operated": "Avg Days Operated per Route"})
+st.dataframe(system_summary, use_container_width=True)
