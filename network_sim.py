@@ -127,7 +127,6 @@ try:
         axis=1
     )
 
-    # Safe stage-length-adjusted TRASM with log fit
     valid_mask = (
         df_raw["Distance (mi)"].notna() &
         df_raw["Distance (mi)"] > 0 &
@@ -161,7 +160,7 @@ try:
     - Plus: **Route Resilience Score (RRS)** based on CASM, BELF, and profit per ASM
     """)
 
-    tab1, tab2 = st.tabs(["📊 Summary View", "🔍 Route Analysis"])
+    tab1, tab2, tab3 = st.tabs(["📊 Summary View", "🔍 Route Analysis", "📌 Scenario Comparison"])
 
     with tab1:
         scenario_options = df_raw["ScenarioLabel"].dropna().unique().tolist()
@@ -198,6 +197,35 @@ try:
             "AF", "Departure Airport", "Arrival Airport", "ASM", "RASM", "TRASM", "Load Factor",
             "Constrained Segment Revenue", "Unconstrained O&D Revenue",
             "Usefulness", "RRS", "Cut", "Days Operated"
+        ]], use_container_width=True)
+
+    with tab3:
+        st.header("📌 Compare Routes Between Two Scenarios")
+
+        scenario_list = df_raw["ScenarioLabel"].dropna().unique().tolist()
+        col1, col2 = st.columns(2)
+        with col1:
+            scenario_a = st.selectbox("Scenario A", scenario_list, key="compare_a")
+        with col2:
+            scenario_b = st.selectbox("Scenario B", scenario_list, key="compare_b")
+
+        df_a = df_raw[df_raw["ScenarioLabel"] == scenario_a].copy()
+        df_b = df_raw[df_raw["ScenarioLabel"] == scenario_b].copy()
+
+        af_a = set(df_a["AF"])
+        af_b = set(df_b["AF"])
+
+        only_in_a = af_a - af_b
+        only_in_b = af_b - af_a
+
+        st.subheader(f"✈️ Routes in **{scenario_a}** but not in **{scenario_b}**")
+        st.dataframe(df_a[df_a["AF"].isin(only_in_a)][[
+            "AF", "Departure Airport", "Arrival Airport", "ASM", "RASM", "TRASM", "Usefulness", "Cut"
+        ]], use_container_width=True)
+
+        st.subheader(f"✈️ Routes in **{scenario_b}** but not in **{scenario_a}**")
+        st.dataframe(df_b[df_b["AF"].isin(only_in_b)][[
+            "AF", "Departure Airport", "Arrival Airport", "ASM", "RASM", "TRASM", "Usefulness", "Cut"
         ]], use_container_width=True)
 
 except Exception as e:
