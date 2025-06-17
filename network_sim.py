@@ -92,16 +92,11 @@ try:
     days_op.columns = ["ScenarioLabel", "AF", "Days Operated"]
     df_raw = df_raw.merge(days_op, on=["ScenarioLabel", "AF"], how="left")
     df_raw["RouteID"] = df_raw["ScenarioLabel"] + ":" + df_raw["AF"]
-    df_raw["Raw Yield (¢/mi)"] = df_raw["Constrained Yield (cent, km)"] * 1.60934
-    log_lengths = np.log(df_raw["Distance (mi)"] + 1)
-    coeffs = np.polyfit(log_lengths.fillna(0), df_raw["Raw Yield (¢/mi)"].fillna(0), 1)
-    df_raw["Normalized Yield (¢/mi)"] = coeffs[0] * log_lengths + coeffs[1]
     df_raw["RPM"] = df_raw["Constrained Segment Pax"] * df_raw["Distance (mi)"]
     df_raw["Load Factor"] = df_raw["RPM"] / df_raw["ASM"] * 100
     df_raw["RASM"] = df_raw["Constrained Segment Revenue"] / df_raw["ASM"] * 100
     df_raw["TRASM"] = df_raw["Unconstrained O&D Revenue"] / df_raw["ASM"] * 100
 
-    # Updated fallback logic after RASM/TRASM/Load Factor calculation
     df_base_lookup = (
         df_raw[df_raw["ScenarioLabel"] != "Pavlina Assumptions"]
         .drop_duplicates(subset=["Departure Airport", "Arrival Airport"])
@@ -114,8 +109,7 @@ try:
         "Load Factor",
         "Constrained Yield (cent, km)",
         "RASM",
-        "TRASM",
-        "Raw Yield (¢/mi)"
+        "TRASM"
     ]
 
     pav_mask = df_raw["ScenarioLabel"] == "Pavlina Assumptions"
@@ -133,17 +127,13 @@ try:
         axis=1
     )
 
-    mean_yield = df_raw["Normalized Yield (¢/mi)"].mean()
-    std_yield = df_raw["Normalized Yield (¢/mi)"].std()
-    mean_lf = df_raw["Load Factor"].mean()
-    mean_rasm = df_raw["RASM"].mean()
-    mean_trasm = df_raw["TRASM"].mean()
+    # Stage-length-normalized TRASM
+    log_stage = np.log(df_raw["Distance (mi)"].fillna(1))
+    trasm_fit = np.polyfit(log_stage, df_raw["TRASM"].fillna(0), 1)
+    df_raw["Normalized TRASM"] = trasm_fit[0] * log_stage + trasm_fit[1]
 
     df_raw["Raw Usefulness"] = (
-        ((df_raw["Normalized Yield (¢/mi)"] - mean_yield) / std_yield +
-         df_raw["Load Factor"] / mean_lf +
-         df_raw["RASM"] / mean_rasm +
-         df_raw["TRASM"] / mean_trasm) / 4
+        (df_raw["TRASM"] - df_raw["Normalized TRASM"]) / df_raw["Normalized TRASM"]
     ) * df_raw["Elasticity"] * (1 + 0.1 * df_raw["Spill Rate"])
 
     min_score = df_raw["Raw Usefulness"].min()
@@ -153,10 +143,8 @@ try:
 
     st.markdown("""
     ### ℹ️ Usefulness Score & Route Resilience
-    This metric combines:
-    - **Stage-Length-Adjusted Yield**
-    - **Load Factor**
-    - **RASM** and **TRASM**
+    This metric now reflects:
+    - **Stage-Length-Adjusted TRASM** (via log-distance curve fit)
     - Adjusted for **Elasticity** and **Spill Rate**
     - Plus: **Route Resilience Score (RRS)** based on CASM, BELF, and profit per ASM
     """)
@@ -196,7 +184,6 @@ try:
         df_view = df_view.sort_values("Usefulness", ascending=False)
         st.dataframe(df_view[[ 
             "AF", "Departure Airport", "Arrival Airport", "ASM", "RASM", "TRASM", "Load Factor",
-            "Raw Yield (¢/mi)", "Normalized Yield (¢/mi)",
             "Constrained Segment Revenue", "Unconstrained O&D Revenue",
             "Usefulness", "RRS", "Cut", "Days Operated"
         ]], use_container_width=True)
