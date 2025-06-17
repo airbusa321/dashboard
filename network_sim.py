@@ -4,7 +4,7 @@ import numpy as np
 
 st.set_page_config(page_title="Route Comparison Dashboard", layout="wide")
 st.title("✈️ Route Comparison: Scenario Insights")
-st.caption("*All yield and RASK values shown in cent/km as provided — no conversion or normalization applied")
+st.caption("*All yield and RASK values shown in cent/km as provided — with log-adjusted SLA and route-level usefulness scoring.")
 
 HUBS = ["DTW", "LAS", "FLL", "MCO", "MSY", "MYR", "ACY", "LGA"]
 
@@ -31,6 +31,8 @@ def load_data():
     df["Constrained Connect Fare"] = pd.to_numeric(df.get("Constrained Connect Fare"), errors="coerce")
     df["Constrained Segment Pax"] = pd.to_numeric(df.get("Constrained Segment Pax"), errors="coerce")
     df["Constrained Local Fare"] = pd.to_numeric(df.get("Constrained Local Fare"), errors="coerce")
+    df["Constrained Local Pax"] = pd.to_numeric(df.get("Constrained Local Pax"), errors="coerce")
+    df["Spill Rate"] = pd.to_numeric(df.get("Spill Rate"), errors="coerce")
 
     df["RouteID"] = df["Departure Airport"].astype(str) + ":" + df["Arrival Airport"].astype(str)
 
@@ -40,6 +42,24 @@ def load_data():
     df = df.merge(days_op, on=["ScenarioLabel", "RouteID"], how="left")
     df["Low Frequency"] = df["Days Operated"] <= 2
 
+    # SLA-adjusted yield and RASM (log-based)
+    df["Stage Length (adj)"] = df["Distance (mi)"].clip(lower=1)
+    df["SLA Adj Yield (km)"] = df["Constrained Yield (cent, km)"] / np.log(df["Stage Length (adj)"])
+    df["SLA Adj RASM (km)"] = df["Constrained RASK (cent)"] / np.log(df["Stage Length (adj)"])
+
+    # True connect share
+    df["Connect Share"] = 1 - (df["Constrained Local Pax"] / df["Constrained Segment Pax"])
+    df["Connect Share"] = df["Connect Share"].clip(lower=0, upper=1)
+
+    # Usefulness Score (Belobaba-style)
+    df["Usefulness Score"] = (
+        df["SLA Adj RASM (km)"] *
+        (df["Load Factor"] / 100) *
+        (1 - df["Spill Rate"]) *
+        (1 - df["Connect Share"])
+    )
+
+    # Yield ratio for inspection
     df["Connect Yield"] = df["Constrained Connect Fare"] / df["Constrained Segment Pax"]
     df["Connect vs O-D Yield Ratio"] = df["Connect Yield"] / df["Constrained Local Fare"]
 
@@ -57,21 +77,18 @@ comparison_scenarios = st.sidebar.multiselect(
 hub_options = ["System-wide"] + HUBS + ["P2P"]
 selected_hub = st.sidebar.selectbox("Filter by Hub", hub_options)
 
-# Helper: clean label for display
+# Clean display label
 def clean_label(label):
     if "(" in label:
         return label.split("(")[0].strip()
-    if ":" in label:
-        return label.split(":")[0].strip()
     return label.strip()
 
-# Hub filtering function
 def filter_by_hub(df):
     if selected_hub == "System-wide":
         return df
     return df[df["Hub"] == selected_hub]
 
-# Core comparison logic
+# Scenario comparisons
 if comparison_scenarios:
     df_base = filter_by_hub(df_raw[df_raw["ScenarioLabel"] == base_scenario])
     routes_base = set(df_base["RouteID"])
@@ -90,11 +107,14 @@ if comparison_scenarios:
             "RouteID",
             "ASM",
             "Constrained Yield (cent, km)",
-            "Load Factor",
+            "SLA Adj Yield (km)",
             "Constrained RASK (cent)",
+            "SLA Adj RASM (km)",
+            "Load Factor",
             "Distance (mi)",
             "Cut",
-            "Connect vs O-D Yield Ratio"
+            "Connect vs O-D Yield Ratio",
+            "Usefulness Score"
         ]].rename(columns={
             "Load Factor": "LF",
             "Connect vs O-D Yield Ratio": "Connecting Yield / O-D Yield"
@@ -103,7 +123,7 @@ if comparison_scenarios:
 else:
     st.info("Select at least one comparison scenario to begin analysis.")
 
-# ASM Totals
+# ASM summary
 st.markdown("### 📊 **ASM Totals by Scenario**")
 asm_summary = (
     df_raw.groupby("ScenarioLabel")["ASM"]
