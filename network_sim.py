@@ -4,7 +4,7 @@ import numpy as np
 
 st.set_page_config(page_title="Route Comparison Dashboard", layout="wide")
 st.title("✈️ Route Comparison: Scenario Insights")
-st.caption("*All values in miles (thousands). SLA adjustment uses stage length in km → YIELD adjusted via log-linear method (β = -0.5, benchmark = 950 km) → then converted to ¢/mi. Usefulness scaled ×1000. ASMs in thousands.*")
+st.caption("*All values in miles (thousands). SLA adjustment uses stage length in km → YIELD and RASK adjusted via log-linear method (β = -0.5, benchmark = 950 km) → then converted to ¢/mi. Usefulness scaled ×1000. ASMs in thousands.*")
 
 HUBS = ["DTW", "LAS", "FLL", "MCO", "MSY", "MYR", "ACY", "LGA"]
 KM_TO_MI = 0.621371
@@ -29,7 +29,8 @@ def load_data():
     df["ASM (000s)"] = pd.to_numeric(df.get("ASM (000s)"), errors="coerce") / 1000
     df["Constrained Yield (cent, km)"] = pd.to_numeric(df["Constrained Yield (cent, km)"], errors="coerce")
     df["Constrained RASK (cent)"] = pd.to_numeric(df["Constrained RASK (cent)"], errors="coerce")
-    df["Load Factor"] = pd.to_numeric(df["Load Factor"].astype(str).str.replace("%", "", regex=False), errors="coerce")
+    df["Load Factor"] = df["Load Factor"].astype(str).str.strip()
+    df["Load Factor Numeric"] = pd.to_numeric(df["Load Factor"].str.replace("%", "", regex=False), errors="coerce")
     df["Constrained Connect Fare"] = pd.to_numeric(df["Constrained Connect Fare"], errors="coerce")
     df["Constrained Segment Pax"] = pd.to_numeric(df["Constrained Segment Pax"], errors="coerce")
     df["Constrained Local Fare"] = pd.to_numeric(df["Constrained Local Fare"], errors="coerce")
@@ -48,15 +49,15 @@ def load_data():
     scaling_factor = (BENCHMARK_STAGE_LENGTH_KM / df["Distance (km)"].clip(lower=1)) ** abs(YIELD_ELASTICITY)
     capped_factor = scaling_factor.clip(upper=scaling_factor.mean() + 1.5 * scaling_factor.std())
 
-    df["SLA Adj RASM (mi)"] = df["Constrained RASK (cent)"] / KM_TO_MI
     df["SLA Adj Yield (mi)"] = df["Constrained Yield (cent, km)"] * capped_factor / KM_TO_MI
+    df["SLA Adj RASM (mi)"] = df["Constrained RASK (cent)"] * capped_factor / KM_TO_MI
 
     df["Connect Share"] = 1 - (df["Constrained Local Pax"] / df["Constrained Segment Pax"])
     df["Connect Share"] = df["Connect Share"].clip(lower=0, upper=1)
 
     df["Usefulness Score"] = 1000 * (
         df["SLA Adj RASM (mi)"] *
-        df["Load Factor"] *
+        (df["Load Factor Numeric"] / 100) *
         (1 - df["Spill Rate"]) *
         (1 - df["Connect Share"])
     )
@@ -112,7 +113,7 @@ with route_tab:
                     "ASM (000s)": "{:.2f}",
                     "SLA Adj Yield (mi)": "{:.2f}",
                     "SLA Adj RASM (mi)": "{:.2f}",
-                    "Load Factor": "{:.1f}%",
+                    "Load Factor": "{}",
                     "Distance (mi)": "{:.1f}",
                     "Usefulness Score": "{:.2f}"
                 }),
@@ -127,7 +128,7 @@ with route_tab:
                     "ASM (000s)": "{:.2f}",
                     "SLA Adj Yield (mi)": "{:.2f}",
                     "SLA Adj RASM (mi)": "{:.2f}",
-                    "Load Factor": "{:.1f}%",
+                    "Load Factor": "{}",
                     "Distance (mi)": "{:.1f}",
                     "Usefulness Score": "{:.2f}"
                 }),
