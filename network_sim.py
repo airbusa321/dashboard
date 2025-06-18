@@ -30,7 +30,7 @@ def load_data():
     df["Constrained Yield (cent, km)"] = pd.to_numeric(df["Constrained Yield (cent, km)"], errors="coerce")
     df["Constrained RASK (cent)"] = pd.to_numeric(df["Constrained RASK (cent)"], errors="coerce")
     df["Load Factor"] = df["Load Factor"].astype(str).str.strip()
-    df["Load Factor Numeric"] = pd.to_numeric(df["Load Factor"].str.replace("%", "", regex=False), errors="coerce")
+    df["Load Factor Numeric"] = pd.to_numeric(df["Load Factor"].str.replace("%", "", regex=False), errors="coerce") * 100
     df["Constrained Connect Fare"] = pd.to_numeric(df["Constrained Connect Fare"], errors="coerce")
     df["Constrained Segment Pax"] = pd.to_numeric(df["Constrained Segment Pax"], errors="coerce")
     df["Constrained Local Fare"] = pd.to_numeric(df["Constrained Local Fare"], errors="coerce")
