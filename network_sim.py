@@ -4,13 +4,12 @@ import numpy as np
 
 st.set_page_config(page_title="Route Comparison Dashboard", layout="wide")
 st.title("✈️ Route Comparison: Scenario Insights")
-st.caption("*All values in miles (thousands). SLA adjustment uses stage length in km → yield/RASK adjusted → then converted to miles. Usefulness scaled ×1000. ASMs in thousands.")
+st.caption("*All values in miles (thousands). SLA adjustment uses stage length in km → RASK adjusted via log-linear method (β = -0.5, benchmark = 950 km) → then converted to RASM in ¢/mi. Usefulness scaled ×1000. ASMs in thousands.")
 
 HUBS = ["DTW", "LAS", "FLL", "MCO", "MSY", "MYR", "ACY", "LGA"]
 KM_TO_MI = 0.621371
 
 @st.cache_data
-
 def load_data():
     df = pd.read_excel("root_routes.xlsx")
     df.columns = [str(c).strip() for c in df.columns]
@@ -44,9 +43,22 @@ def load_data():
 
     df = df[~((df["Constrained Yield (cent, km)"] == 0) & (df["Constrained RASK (cent)"] == 0))]
 
-    df["SLA Adj Yield (mi)"] = (df["Constrained Yield (cent, km)"]) / np.log(df["Distance (km)"].clip(lower=1)) * KM_TO_MI * 10
-    df["SLA Adj RASM (mi)"] = (df["Constrained RASK (cent)"]) / np.log(df["Distance (km)"].clip(lower=1)) * KM_TO_MI
+    # --- Stage-Length Adjustment Parameters ---
+    BENCHMARK_STAGE_LENGTH_KM = 950
+    YIELD_ELASTICITY = -0.5
 
+    # --- SLA RASK Adjustment (log-linear method) ---
+    df["SLA Adj RASK (cent, km)"] = df["Constrained RASK (cent)"] * (
+        (BENCHMARK_STAGE_LENGTH_KM / df["Distance (km)"].clip(lower=1)) ** abs(YIELD_ELASTICITY)
+    )
+    df["SLA Adj RASM (mi)"] = df["SLA Adj RASK (cent, km)"] / KM_TO_MI
+
+    # --- SLA Yield Adjustment (optional, to match structure) ---
+    df["SLA Adj Yield (mi)"] = df["Constrained Yield (cent, km)"] * (
+        (BENCHMARK_STAGE_LENGTH_KM / df["Distance (km)"].clip(lower=1)) ** abs(YIELD_ELASTICITY)
+    ) / KM_TO_MI
+
+    # --- Connect Share & Usefulness Score ---
     df["Connect Share"] = 1 - (df["Constrained Local Pax"] / df["Constrained Segment Pax"])
     df["Connect Share"] = df["Connect Share"].clip(lower=0, upper=1)
 
