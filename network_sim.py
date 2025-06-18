@@ -4,7 +4,7 @@ import numpy as np
 
 st.set_page_config(page_title="Route Comparison Dashboard", layout="wide")
 st.title("✈️ Route Comparison: Scenario Insights")
-st.caption("*All values in miles (thousands). SLA adjustment uses stage length in km → RASK adjusted via log-linear method (β = -0.5, benchmark = 950 km) → then converted to RASM in ¢/mi. Usefulness scaled ×1000. ASMs in thousands.")
+st.caption("*All values in miles (thousands). SLA adjustment uses stage length in km → YIELD adjusted via log-linear method (β = -0.5, benchmark = 950 km) → then converted to ¢/mi. Usefulness scaled ×1000. ASMs in thousands.*")
 
 HUBS = ["DTW", "LAS", "FLL", "MCO", "MSY", "MYR", "ACY", "LGA"]
 KM_TO_MI = 0.621371
@@ -26,10 +26,10 @@ def load_data():
     df["Distance (mi)"] = pd.to_numeric(df.get("Distance (mi)"), errors="coerce")
     df["Distance (km)"] = pd.to_numeric(df.get("Distance (km)"), errors="coerce")
     df["Seats"] = pd.to_numeric(df["Seats"], errors="coerce")
-    df["ASM (000s)"] = pd.to_numeric(df.get("ASM (000s)"), errors="coerce")
+    df["ASM (000s)"] = pd.to_numeric(df["ASM (000s)"], errors="coerce") / 1000
     df["Constrained Yield (cent, km)"] = pd.to_numeric(df["Constrained Yield (cent, km)"], errors="coerce")
     df["Constrained RASK (cent)"] = pd.to_numeric(df["Constrained RASK (cent)"], errors="coerce")
-    df["Load Factor"] = pd.to_numeric(df["Load Factor"].astype(str).str.replace("%", "", regex=False), errors="coerce")
+    df["Load Factor"] = df["Load Factor"].astype(str).str.replace("%", "", regex=False).astype(float)
     df["Constrained Connect Fare"] = pd.to_numeric(df["Constrained Connect Fare"], errors="coerce")
     df["Constrained Segment Pax"] = pd.to_numeric(df["Constrained Segment Pax"], errors="coerce")
     df["Constrained Local Fare"] = pd.to_numeric(df["Constrained Local Fare"], errors="coerce")
@@ -48,8 +48,7 @@ def load_data():
     scaling_factor = (BENCHMARK_STAGE_LENGTH_KM / df["Distance (km)"].clip(lower=1)) ** abs(YIELD_ELASTICITY)
     capped_factor = scaling_factor.clip(upper=scaling_factor.mean() + 1.5 * scaling_factor.std())
 
-    df["SLA Adj RASK (cent, km)"] = df["Constrained RASK (cent)"] * capped_factor
-    df["SLA Adj RASM (mi)"] = df["SLA Adj RASK (cent, km)"] / KM_TO_MI
+    df["SLA Adj RASM (mi)"] = df["Constrained RASK (cent)"] / KM_TO_MI
     df["SLA Adj Yield (mi)"] = df["Constrained Yield (cent, km)"] * capped_factor / KM_TO_MI
 
     df["Connect Share"] = 1 - (df["Constrained Local Pax"] / df["Constrained Segment Pax"])
@@ -69,7 +68,6 @@ def load_data():
 
 df_raw = load_data()
 
-# Tabs
 route_tab, validation_tab = st.tabs(["Scenario Comparison", "ASG vs Spirit Validation"])
 
 with route_tab:
@@ -109,7 +107,7 @@ with route_tab:
             st.dataframe(
                 df_comp[df_comp["RouteID"].isin(new_routes)][[
                     "RouteID", "ASM (000s)", "SLA Adj Yield (mi)", "SLA Adj RASM (mi)", "Load Factor", "Distance (mi)", "Usefulness Score"
-                ]].style.format({
+                ]].drop_duplicates(subset=["RouteID", "Flight Number"]).style.format({
                     "ASM (000s)": "{:.2f}",
                     "SLA Adj Yield (mi)": "{:.2f}",
                     "SLA Adj RASM (mi)": "{:.2f}",
@@ -124,7 +122,7 @@ with route_tab:
             st.dataframe(
                 df_base[df_base["RouteID"].isin(cut_routes)][[
                     "RouteID", "ASM (000s)", "SLA Adj Yield (mi)", "SLA Adj RASM (mi)", "Load Factor", "Distance (mi)", "Usefulness Score"
-                ]].style.format({
+                ]].drop_duplicates(subset=["RouteID", "Flight Number"]).style.format({
                     "ASM (000s)": "{:.2f}",
                     "SLA Adj Yield (mi)": "{:.2f}",
                     "SLA Adj RASM (mi)": "{:.2f}",
@@ -147,46 +145,3 @@ with route_tab:
                 .style.format({"Change (pp)": "{:.2f}"}),
                 use_container_width=True
             )
-
-with validation_tab:
-    st.header("ASG vs Spirit Validation")
-    comparison_data = {
-        "Market": [
-            "PHL", "BWI", "ORD", "TPA", "ATL", "BNA", "MKE", "SAN", "SJC",
-            "EWRLAX", "IAHLAX", "EWRIHA", "BNALAX", "BWIJPU", "SATSJU", "CUNPHL",
-            "BWIIMB", "CHAEWR", "CAEEWR", "BHMEWR", "BDLLNA", "EWRRDU",
-            "BOG", "CLO", "CUN", "SLC", "ZCL",
-            "RSW", "CUN", "CHS",
-            "CLT", "CLO", "STI", "BDL", "STX", "SDF", "AXM", "SAT", "PIT", "SXM", "SJU", "RIC"
-        ],
-        "ASMs in NK plan (M)": [
-            11.1, 10.7, 10.3, 5.0, 4.8, 4.6, 3.2, 2.1, 2.0,
-            6.2, 3.5, 2.1, 2.0, 1.6, 1.5, 1.5,
-            0.9, 0.7, 0.7, 0.6, 0.6, 0.6,
-            6.2, 2.7, 2.4, 2.1, 2.0,
-            2.4, 2.4, 1.0,
-            4.4, 4.0, 3.8, 3.4, 2.9, 2.3, 2.2, 2.1, 1.8, 1.5, 1.3, 1.5
-        ],
-        "Margin (variable)": [
-            -3, -10, -2, -9, -4, -14, -18, 1, 10,
-            -3, -1, -5, -9, -7, -15, -20,
-            "new", "new", "new", "new", "new", "new",
-            -5, -3, -1, 6, -6,
-            1, 1, -145,
-            10, 0, 25, -8, 8, 14, 9, 17, -13, -13, -5, 5
-        ],
-        "Margin (ex ownership)": [
-            -28, -13, -4, -12, -17, -24, -27, -31, -23,
-            -32, -13, -27, -32, -30, -47, -24,
-            "new", "new", "new", "new", "new", "new",
-            -33, -25, -37, -19, -36,
-            -37, -38, -222,
-            -19, -25, 7, -49, -19, -16, -13, -6, -17, -30, -25, -25
-        ]
-    }
-    asg_df = pd.DataFrame(comparison_data)
-    st.dataframe(asg_df)
-
-    agreed = asg_df["Margin (variable)"].apply(lambda x: isinstance(x, (int, float)))
-    if agreed.all():
-        st.success("✅ All numerical values present and valid.")
