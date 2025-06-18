@@ -45,7 +45,7 @@ def load_data():
     BENCHMARK_STAGE_LENGTH_MI = 1000
     YIELD_ELASTICITY = -0.5
 
-    scaling_factor = (BENCHMARK_STAGE_LENGTH_MI / df["Distance (mi)"].clip(lower=1)) ** abs(YIELD_ELASTICITY)
+    scaling_factor = (df["Distance (mi)"].clip(lower=1) / BENCHMARK_STAGE_LENGTH_MI) ** abs(YIELD_ELASTICITY)
     capped_factor = scaling_factor.clip(upper=scaling_factor.mean() + 1.5 * scaling_factor.std())
 
     df["SLA Adj Yield (mi)"] = df["Constrained Yield (cent, km)"] / KM_TO_MI * capped_factor
@@ -139,7 +139,7 @@ with route_tab:
 
             st.markdown(f"### 📉 **Market SLA RASM Delta (`{clean_comp}` vs `{clean_base}`) — By Hub**")
             merged = df_base[df_base["RouteID"].isin(continued_routes)][["RouteID", "SLA Adj RASM (mi)", "Hub"]].merge(
-                df_comp[["RouteID", "SLA Adj RASM (mi)"]], on="RouteID", suffixes=("_base", "_comp")
+                df_comp[["RouteID", "SLA Adj RASM (mi)"]], on="RouteID", suffixes=('_base', '_comp')
             )
             merged["Change (pp)"] = merged["SLA Adj RASM (mi)_comp"] - merged["SLA Adj RASM (mi)_base"]
 
