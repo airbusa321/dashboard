@@ -113,7 +113,7 @@ with route_tab:
                     "ASM (000s)": "{:.2f}",
                     "SLA Adj Yield (mi)": "{:.2f}",
                     "SLA Adj RASM (mi)": "{:.2f}",
-                    "Load Factor": "{}",
+                    "Load Factor": "{:.2f}%",
                     "Distance (mi)": "{:.1f}",
                     "Usefulness Score": "{:.2f}"
                 }),
@@ -128,7 +128,7 @@ with route_tab:
                     "ASM (000s)": "{:.2f}",
                     "SLA Adj Yield (mi)": "{:.2f}",
                     "SLA Adj RASM (mi)": "{:.2f}",
-                    "Load Factor": "{}",
+                    "Load Factor": "{:.2f}%",
                     "Distance (mi)": "{:.1f}",
                     "Usefulness Score": "{:.2f}"
                 }),
