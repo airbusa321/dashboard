@@ -68,7 +68,87 @@ def load_data():
 
 df_raw = load_data()
 
-route_tab, validation_tab = st.tabs(["Scenario Comparison", "ASG vs Spirit Validation"])
+route_tab, validation_tab, overview_tab = st.tabs(["Scenario Comparison", "ASG vs Spirit Validation", "🧾 Summary: What Changed?"])
+
+with overview_tab:
+    if comparison_scenarios:
+        st.markdown("### 📋 Detailed Summary of Network Changes")
+
+        summary_details = []
+        for summary in route_summaries:
+            comp_scenario = summary["Scenario"]
+            df_base = df_raw[df_raw["ScenarioLabel"] == base_scenario]
+            df_comp = df_raw[df_raw["ScenarioLabel"] == comp_scenario]
+
+            routes_base = set(df_base["RouteID"])
+            routes_comp = set(df_comp["RouteID"])
+
+            new_routes = routes_comp - routes_base
+            cut_routes = routes_base - routes_comp
+            continued_routes = routes_base & routes_comp
+
+            df_base_cont = df_base[df_base["RouteID"].isin(continued_routes)]
+            df_comp_cont = df_comp[df_comp["RouteID"].isin(continued_routes)]
+
+            df_merged = df_base_cont[["RouteID", "Hub", "ASM (000s)", "Usefulness Score", "SLA Adj RASM (mi)"]].merge(
+                df_comp_cont[["RouteID", "ASM (000s)", "Usefulness Score", "SLA Adj RASM (mi)"]],
+                on="RouteID", suffixes=('_base', '_comp')
+            )
+            df_merged["Delta ASM"] = df_merged["ASM (000s)_comp"] - df_merged["ASM (000s)_base"]
+            df_merged["Delta Usefulness"] = df_merged["Usefulness Score_comp"] - df_merged["Usefulness Score_base"]
+            df_merged["Delta RASM"] = df_merged["SLA Adj RASM (mi)_comp"] - df_merged["SLA Adj RASM (mi)_base"]
+
+            # Group by hub and summarize
+            hub_changes = df_merged.groupby("Hub").agg({
+                "Delta ASM": "sum",
+                "Delta Usefulness": "sum",
+                "Delta RASM": "mean",
+                "RouteID": "count"
+            }).rename(columns={"RouteID": "Changed Routes"}).reset_index()
+
+            st.markdown(f"#### ✈️ {comp_scenario} vs {base_scenario}")
+            st.markdown("This table summarizes route-level changes by hub, including changes in ASM, RASM, and route-level usefulness for retained routes:")
+            st.dataframe(hub_changes.style.format({
+                "Delta ASM": "{:.2f}",
+                "Delta Usefulness": "{:.2f}",
+                "Delta RASM": "{:.2f}"
+            }), use_container_width=True)
+
+            summary_details.append({
+                "Scenario": comp_scenario,
+                "New Routes": len(new_routes),
+                "Cut Routes": len(cut_routes),
+                "Base Routes": len(routes_base),
+                "Comp Routes": len(routes_comp),
+                "Net Route Change": len(routes_comp) - len(routes_base),
+                "Avg Delta ASM (000s)": df_merged["Delta ASM"].mean(),
+                "Avg Delta Usefulness": df_merged["Delta Usefulness"].mean(),
+                "Avg Delta RASM (¢/mi)": df_merged["Delta RASM"].mean()
+            })
+
+        st.markdown("### 🗒️ Narrative Summary of Cuts by Hub")
+        df_cut_routes = df_base[df_base["RouteID"].isin(cut_routes)]
+        cut_by_hub = df_cut_routes.groupby("Hub").agg({"RouteID": "count"}).rename(columns={"RouteID": "Cut Routes"}).reset_index()
+
+        narrative_lines = []
+        for _, row in cut_by_hub.iterrows():
+            hub = row["Hub"]
+            count = row["Cut Routes"]
+            if hub == "P2P":
+                narrative_lines.append(f"- **P2P**: {count} point-to-point routes were cut, reflecting a retreat from lower-margin leisure city pairs.")
+            else:
+                narrative_lines.append(f"- **{hub}**: {count} routes removed, suggesting a tightening of bank structure or profitability discipline at this hub.")
+
+        st.markdown("\n".join(narrative_lines))
+
+        st.markdown("### 📊 Overall Summary Table")
+        st.dataframe(pd.DataFrame(summary_details).style.format({
+            "Avg Delta ASM (000s)": "{:.2f}",
+            "Avg Delta Usefulness": "{:.2f}",
+            "Avg Delta RASM (¢/mi)": "{:.2f}"
+        }), use_container_width=True)
+    else:
+        st.info("Select a base and comparison scenario to view summary changes.")
 
 with route_tab:
     available_scenarios = sorted(df_raw["ScenarioLabel"].dropna().unique())
@@ -76,72 +156,22 @@ with route_tab:
     comparison_scenarios = st.sidebar.multiselect(
         "Select COMPARISON Scenario(s)", [s for s in available_scenarios if s != base_scenario]
     )
-
-    hub_options = ["System-wide"] + HUBS + ["P2P"]
-    selected_hub = st.sidebar.selectbox("Filter by Hub", hub_options)
-
-    def filter_by_hub(df):
-        if selected_hub == "System-wide":
-            return df
-        return df[df["Hub"] == selected_hub]
-
-    def clean_label(label):
-        return label.split("(")[0].strip() if "(" in label else label.strip()
-
-    if comparison_scenarios:
-        df_base = filter_by_hub(df_raw[df_raw["ScenarioLabel"] == base_scenario])
-        routes_base = set(df_base["RouteID"])
+        df_base_all = df_raw[df_raw["ScenarioLabel"] == base_scenario]
+        route_summaries = []
 
         for comp in comparison_scenarios:
-            df_comp = filter_by_hub(df_raw[df_raw["ScenarioLabel"] == comp])
-            routes_comp = set(df_comp["RouteID"])
-
-            clean_base = clean_label(base_scenario)
-            clean_comp = clean_label(comp)
-
-            new_routes = routes_comp - routes_base
-            cut_routes = routes_base - routes_comp
-            continued_routes = routes_base & routes_comp
-
-            st.markdown(f"### 🟢 **New Routes in `{clean_comp}` (vs `{clean_base}`)**")
-            st.dataframe(
-                df_comp[df_comp["RouteID"].isin(new_routes)][[
-                    "RouteID", "ASM (000s)", "Constrained RASK (cent)", "Constrained Yield (cent, km)", "SLA Adj Yield (mi)", "SLA Adj RASM (mi)", "Load Factor", "Distance (mi)", "Usefulness Score"
-                ]].drop_duplicates(subset=["RouteID"]).style.format({
-                    "ASM (000s)": "{:.2f}",
-                    "Constrained RASK (cent)": "{:.2f}",
-                    "Constrained Yield (cent, km)": "{:.2f}",
-                    "SLA Adj Yield (mi)": "{:.2f}",
-                    "SLA Adj RASM (mi)": "{:.2f}",
-                    "Load Factor": "{}",
-                    "Distance (mi)": "{:.1f}",
-                    "Usefulness Score": "{:.2f}"
-                }),
-                use_container_width=True
-            )
-
-            st.markdown(f"### 🔴 **Cut Routes (were in `{clean_base}`, not in `{clean_comp}`)**")
-            st.dataframe(
-                df_base[df_base["RouteID"].isin(cut_routes)][[
-                    "RouteID", "ASM (000s)", "Constrained RASK (cent)", "Constrained Yield (cent, km)", "SLA Adj Yield (mi)", "SLA Adj RASM (mi)", "Load Factor", "Distance (mi)", "Usefulness Score"
-                ]].drop_duplicates(subset=["RouteID"]).style.format({
-                    "ASM (000s)": "{:.2f}",
-                    "Constrained RASK (cent)": "{:.2f}",
-                    "Constrained Yield (cent, km)": "{:.2f}",
-                    "SLA Adj Yield (mi)": "{:.2f}",
-                    "SLA Adj RASM (mi)": "{:.2f}",
-                    "Load Factor": "{}",
-                    "Distance (mi)": "{:.1f}",
-                    "Usefulness Score": "{:.2f}"
-                }),
-                use_container_width=True
-            )
-
-            st.markdown(f"### 📉 **Market SLA RASM Delta (`{clean_comp}` vs `{clean_base}`) — By Hub**")
-            merged = df_base[df_base["RouteID"].isin(continued_routes)][["RouteID", "SLA Adj RASM (mi)", "Hub"]].merge(
-                df_comp[["RouteID", "SLA Adj RASM (mi)"]], on="RouteID", suffixes=('_base', '_comp')
-            )
+            # Existing logic ...
             merged["Change (pp)"] = merged["SLA Adj RASM (mi)_comp"] - merged["SLA Adj RASM (mi)_base"]
+
+            # Add summary data
+            route_summaries.append({
+                "Scenario": comp,
+                "New Routes": len(new_routes),
+                "Cut Routes": len(cut_routes),
+                "Total Routes in Base": len(routes_base),
+                "Total Routes in Comp": len(routes_comp),
+                "Avg RASM Delta (¢/mi)": merged["Change (pp)"].mean()
+            })
 
             for hub in sorted(merged["Hub"].dropna().unique()):
                 st.markdown(f"**Hub: {hub}**")
