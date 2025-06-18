@@ -18,7 +18,8 @@ def load_data():
         "Flight Number": "Flight Number",
         "Departure Day": "Day of Week",
         "Dist mi": "Distance (mi)",
-        "Distance (km)": "Distance (km)"
+        "Distance (km)": "Distance (km)",
+        "ASM": "ASM (000s)"
     }, inplace=True)
 
     df["Hub (nested)"] = df["Hub (nested)"].astype(str).str.strip()
@@ -27,7 +28,7 @@ def load_data():
     df["Distance (mi)"] = pd.to_numeric(df.get("Distance (mi)"), errors="coerce")
     df["Distance (km)"] = pd.to_numeric(df.get("Distance (km)"), errors="coerce")
     df["Seats"] = pd.to_numeric(df.get("Seats", 1), errors="coerce")
-    df["ASM"] = pd.to_numeric(df.get("ASM", df["Seats"] * df["Distance (mi)"]), errors="coerce") / 1000  # ASM in thousands
+    df["ASM (000s)"] = pd.to_numeric(df.get("ASM (000s)", df["Seats"] * df["Distance (mi)"]), errors="coerce") / 1000
     df["Constrained Yield (cent, km)"] = pd.to_numeric(df.get("Constrained Yield (cent, km)"), errors="coerce")
     df["Constrained RASK (cent)"] = pd.to_numeric(df.get("Constrained RASK (cent)"), errors="coerce")
     df["Load Factor"] = pd.to_numeric(df["Load Factor"].astype(str).str.replace("%", ""), errors="coerce")
@@ -43,22 +44,18 @@ def load_data():
 
     df = df[~((df["Constrained Yield (cent, km)"] == 0) & (df["Constrained RASK (cent)"] == 0))]
 
-    # --- Stage-Length Adjustment Parameters ---
     BENCHMARK_STAGE_LENGTH_KM = 950
     YIELD_ELASTICITY = -0.5
 
-    # --- SLA RASK Adjustment (log-linear method) ---
     df["SLA Adj RASK (cent, km)"] = df["Constrained RASK (cent)"] * (
         (BENCHMARK_STAGE_LENGTH_KM / df["Distance (km)"].clip(lower=1)) ** abs(YIELD_ELASTICITY)
     )
     df["SLA Adj RASM (mi)"] = df["SLA Adj RASK (cent, km)"] / KM_TO_MI
 
-    # --- SLA Yield Adjustment (optional, to match structure) ---
     df["SLA Adj Yield (mi)"] = df["Constrained Yield (cent, km)"] * (
         (BENCHMARK_STAGE_LENGTH_KM / df["Distance (km)"].clip(lower=1)) ** abs(YIELD_ELASTICITY)
     ) / KM_TO_MI
 
-    # --- Connect Share & Usefulness Score ---
     df["Connect Share"] = 1 - (df["Constrained Local Pax"] / df["Constrained Segment Pax"])
     df["Connect Share"] = df["Connect Share"].clip(lower=0, upper=1)
 
@@ -76,85 +73,128 @@ def load_data():
 
 df_raw = load_data()
 
-available_scenarios = sorted(df_raw["ScenarioLabel"].dropna().unique())
-base_scenario = st.sidebar.selectbox("Select BASE Scenario", available_scenarios)
-comparison_scenarios = st.sidebar.multiselect(
-    "Select COMPARISON Scenario(s)", [s for s in available_scenarios if s != base_scenario]
-)
+# Tabs for Dashboard and Validation
+route_tab, validation_tab = st.tabs(["Scenario Comparison", "ASG vs Spirit Validation"])
 
-hub_options = ["System-wide"] + HUBS + ["P2P"]
-selected_hub = st.sidebar.selectbox("Filter by Hub", hub_options)
+with route_tab:
+    available_scenarios = sorted(df_raw["ScenarioLabel"].dropna().unique())
+    base_scenario = st.sidebar.selectbox("Select BASE Scenario", available_scenarios)
+    comparison_scenarios = st.sidebar.multiselect(
+        "Select COMPARISON Scenario(s)", [s for s in available_scenarios if s != base_scenario]
+    )
 
-def filter_by_hub(df):
-    if selected_hub == "System-wide":
-        return df
-    return df[df["Hub"] == selected_hub]
+    hub_options = ["System-wide"] + HUBS + ["P2P"]
+    selected_hub = st.sidebar.selectbox("Filter by Hub", hub_options)
 
-def clean_label(label):
-    return label.split("(")[0].strip() if "(" in label else label.strip()
+    def filter_by_hub(df):
+        if selected_hub == "System-wide":
+            return df
+        return df[df["Hub"] == selected_hub]
 
-if comparison_scenarios:
-    df_base = filter_by_hub(df_raw[df_raw["ScenarioLabel"] == base_scenario])
-    routes_base = set(df_base["RouteID"])
+    def clean_label(label):
+        return label.split("(")[0].strip() if "(" in label else label.strip()
 
-    for comp in comparison_scenarios:
-        df_comp = filter_by_hub(df_raw[df_raw["ScenarioLabel"] == comp])
-        routes_comp = set(df_comp["RouteID"])
+    if comparison_scenarios:
+        df_base = filter_by_hub(df_raw[df_raw["ScenarioLabel"] == base_scenario])
+        routes_base = set(df_base["RouteID"])
 
-        clean_base = clean_label(base_scenario)
-        clean_comp = clean_label(comp)
+        for comp in comparison_scenarios:
+            df_comp = filter_by_hub(df_raw[df_raw["ScenarioLabel"] == comp])
+            routes_comp = set(df_comp["RouteID"])
 
-        new_routes = routes_comp - routes_base
-        cut_routes = routes_base - routes_comp
-        continued_routes = routes_base & routes_comp
+            clean_base = clean_label(base_scenario)
+            clean_comp = clean_label(comp)
 
-        st.markdown(f"### 🟢 **New Routes in `{clean_comp}` (vs `{clean_base}`)**")
-        st.dataframe(
-            df_comp[df_comp["RouteID"].isin(new_routes)][[
-                "RouteID", "ASM", "SLA Adj Yield (mi)", "SLA Adj RASM (mi)", "Load Factor", "Distance (mi)", "Usefulness Score"
-            ]].style.format({
-                "ASM": "{:.2f}",
-                "SLA Adj Yield (mi)": "{:.2f}",
-                "SLA Adj RASM (mi)": "{:.2f}",
-                "Load Factor": "{:.1f}%",
-                "Distance (mi)": "{:.1f}",
-                "Usefulness Score": "{:.2f}"
-            }),
-            use_container_width=True
-        )
+            new_routes = routes_comp - routes_base
+            cut_routes = routes_base - routes_comp
+            continued_routes = routes_base & routes_comp
 
-        st.markdown(f"### 🔴 **Cut Routes (were in `{clean_base}`, not in `{clean_comp}`)**")
-        st.dataframe(
-            df_base[df_base["RouteID"].isin(cut_routes)][[
-                "RouteID", "ASM", "SLA Adj Yield (mi)", "SLA Adj RASM (mi)", "Load Factor", "Distance (mi)", "Usefulness Score"
-            ]].style.format({
-                "ASM": "{:.2f}",
-                "SLA Adj Yield (mi)": "{:.2f}",
-                "SLA Adj RASM (mi)": "{:.2f}",
-                "Load Factor": "{:.1f}%",
-                "Distance (mi)": "{:.1f}",
-                "Usefulness Score": "{:.2f}"
-            }),
-            use_container_width=True
-        )
+            st.markdown(f"### 🟢 **New Routes in `{clean_comp}` (vs `{clean_base}`)**")
+            st.dataframe(
+                df_comp[df_comp["RouteID"].isin(new_routes)][[
+                    "RouteID", "ASM (000s)", "SLA Adj Yield (mi)", "SLA Adj RASM (mi)", "Load Factor", "Distance (mi)", "Usefulness Score"
+                ]].style.format({
+                    "ASM (000s)": "{:.2f}",
+                    "SLA Adj Yield (mi)": "{:.2f}",
+                    "SLA Adj RASM (mi)": "{:.2f}",
+                    "Load Factor": "{:.1f}%",
+                    "Distance (mi)": "{:.1f}",
+                    "Usefulness Score": "{:.2f}"
+                }),
+                use_container_width=True
+            )
 
-        st.markdown(f"### 📉 **Market SLA RASM Delta (`{clean_comp}` vs `{clean_base}`)**")
-        merged = df_base[df_base["RouteID"].isin(continued_routes)][["RouteID", "SLA Adj RASM (mi)"]].merge(
-            df_comp[["RouteID", "SLA Adj RASM (mi)"]], on="RouteID", suffixes=("_base", "_comp")
-        )
-        merged["Change (pp)"] = merged["SLA Adj RASM (mi)_comp"] - merged["SLA Adj RASM (mi)_base"]
+            st.markdown(f"### 🔴 **Cut Routes (were in `{clean_base}`, not in `{clean_comp}`)**")
+            st.dataframe(
+                df_base[df_base["RouteID"].isin(cut_routes)][[
+                    "RouteID", "ASM (000s)", "SLA Adj Yield (mi)", "SLA Adj RASM (mi)", "Load Factor", "Distance (mi)", "Usefulness Score"
+                ]].style.format({
+                    "ASM (000s)": "{:.2f}",
+                    "SLA Adj Yield (mi)": "{:.2f}",
+                    "SLA Adj RASM (mi)": "{:.2f}",
+                    "Load Factor": "{:.1f}%",
+                    "Distance (mi)": "{:.1f}",
+                    "Usefulness Score": "{:.2f}"
+                }),
+                use_container_width=True
+            )
 
-        st.dataframe(
-            merged.sort_values("Change (pp)", ascending=False).style.format({
-                "SLA Adj RASM (mi)_base": "{:.2f}",
-                "SLA Adj RASM (mi)_comp": "{:.2f}",
-                "Change (pp)": "{:.2f}"
-            }),
-            use_container_width=True
-        )
-else:
-    st.info("Select at least one comparison scenario to begin analysis.")
+            st.markdown(f"### 📉 **Market SLA RASM Delta (`{clean_comp}` vs `{clean_base}`)**")
+            merged = df_base[df_base["RouteID"].isin(continued_routes)][["RouteID", "SLA Adj RASM (mi)"]].merge(
+                df_comp[["RouteID", "SLA Adj RASM (mi)"]], on="RouteID", suffixes=("_base", "_comp")
+            )
+            merged["Change (pp)"] = merged["SLA Adj RASM (mi)_comp"] - merged["SLA Adj RASM (mi)_base"]
 
-st.markdown("### 🏙️ SLA RASM by Hub and Scenario")
-sla_summary = df_raw.groupby(["ScenarioLabel", "Hub"])["SLA Adj RASM (mi)"].mean().reset_index()
-st.dataframe(sla_summary.style.format({"SLA Adj RASM (mi)": "{:.2f}"}), use_container_width=True)
+            st.dataframe(
+                merged.sort_values("Change (pp)", ascending=False).style.format({
+                    "SLA Adj RASM (mi)_base": "{:.2f}",
+                    "SLA Adj RASM (mi)_comp": "{:.2f}",
+                    "Change (pp)": "{:.2f}"
+                }),
+                use_container_width=True
+            )
+    else:
+        st.info("Select at least one comparison scenario to begin analysis.")
+
+    st.markdown("### 🏩 SLA RASM by Hub and Scenario")
+    sla_summary = df_raw.groupby(["ScenarioLabel", "Hub"])["SLA Adj RASM (mi)"].mean().reset_index()
+    st.dataframe(sla_summary.style.format({"SLA Adj RASM (mi)": "{:.2f}"}), use_container_width=True)
+
+with validation_tab:
+    st.header("ASG vs Spirit Validation")
+    comparison_data = {
+        "Market": [
+            "PHL", "BWI", "ORD", "TPA", "ATL", "BNA", "MKE", "SAN", "SJC",
+            "EWRLAX", "IAHLAX", "EWRIHA", "BNALAX", "BWIJPU", "SATSJU", "CUNPHL",
+            "BWIIMB", "CHAEWR", "CAEEWR", "BHMEWR", "BDLLNA", "EWRRDU",
+            "BOG", "CLO", "CUN", "SLC", "ZCL",
+            "RSW", "CUN", "CHS",
+            "CLT", "CLO", "STI", "BDL", "STX", "SDF", "AXM", "SAT", "PIT", "SXM", "SJU", "RIC"
+        ],
+        "ASMs in NK plan (M)": [
+            11.1, 10.7, 10.3, 5.0, 4.8, 4.6, 3.2, 2.1, 2.0,
+            6.2, 3.5, 2.1, 2.0, 1.6, 1.5, 1.5,
+            0.9, 0.7, 0.7, 0.6, 0.6, 0.6,
+            6.2, 2.7, 2.4, 2.1, 2.0,
+            2.4, 2.4, 1.0,
+            4.4, 4.0, 3.8, 3.4, 2.9, 2.3, 2.2, 2.1, 1.8, 1.5, 1.3, 1.5
+        ],
+        "Margin (variable)": [
+            -3, -10, -2, -9, -4, -14, -18, 1, 10,
+            -3, -1, -5, -9, -7, -15, -20,
+            "new", "new", "new", "new", "new", "new",
+            -5, -3, -1, 6, -6,
+            1, 1, -145,
+            10, 0, 25, -8, 8, 14, 9, 17, -13, -13, -5, 5
+        ],
+        "Margin (ex ownership)": [
+            -28, -13, -4, -12, -17, -24, -27, -31, -23,
+            -32, -13, -27, -32, -30, -47, -24,
+            "new", "new", "new", "new", "new", "new",
+            -33, -25, -37, -19, -36,
+            -37, -38, -222,
+            -19, -25, 7, -49, -19, -16, -13, -6, -17, -30, -25, -25
+        ]
+    }
+    asg_df = pd.DataFrame(comparison_data)
+    st.dataframe(asg_df)
