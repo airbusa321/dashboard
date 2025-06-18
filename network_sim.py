@@ -31,7 +31,7 @@ def load_data():
     df["ASM (000s)"] = pd.to_numeric(df.get("ASM (000s)", df["Seats"] * df["Distance (mi)"]), errors="coerce") / 1000
     df["Constrained Yield (cent, km)"] = pd.to_numeric(df.get("Constrained Yield (cent, km)"), errors="coerce")
     df["Constrained RASK (cent)"] = pd.to_numeric(df.get("Constrained RASK (cent)"), errors="coerce")
-    df["Load Factor"] = pd.to_numeric(df["Load Factor"].astype(str).str.replace("%", ""), errors="coerce")
+    df["Load Factor"] = df["Load Factor"].astype(str).str.replace("%", "").astype(float).str.replace("%", ""), errors="coerce")
     df["Constrained Connect Fare"] = pd.to_numeric(df.get("Constrained Connect Fare"), errors="coerce")
     df["Constrained Segment Pax"] = pd.to_numeric(df.get("Constrained Segment Pax"), errors="coerce")
     df["Constrained Local Fare"] = pd.to_numeric(df.get("Constrained Local Fare"), errors="coerce")
@@ -47,14 +47,12 @@ def load_data():
     BENCHMARK_STAGE_LENGTH_KM = 950
     YIELD_ELASTICITY = -0.5
 
-    df["SLA Adj RASK (cent, km)"] = df["Constrained RASK (cent)"] * (
-        (BENCHMARK_STAGE_LENGTH_KM / df["Distance (km)"].clip(lower=1)) ** abs(YIELD_ELASTICITY)
-    )
+    scaling_factor = (BENCHMARK_STAGE_LENGTH_KM / df["Distance (km)"].clip(lower=1)) ** abs(YIELD_ELASTICITY)
+    capped_factor = scaling_factor.clip(upper=scaling_factor.mean() + 1.5 * scaling_factor.std())
+    df["SLA Adj RASK (cent, km)"] = df["Constrained RASK (cent)"] * capped_factor
     df["SLA Adj RASM (mi)"] = df["SLA Adj RASK (cent, km)"] / KM_TO_MI
 
-    df["SLA Adj Yield (mi)"] = df["Constrained Yield (cent, km)"] * (
-        (BENCHMARK_STAGE_LENGTH_KM / df["Distance (km)"].clip(lower=1)) ** abs(YIELD_ELASTICITY)
-    ) / KM_TO_MI
+    df["SLA Adj Yield (mi)"] = df["Constrained Yield (cent, km)"] * capped_factor / KM_TO_MI
 
     df["Connect Share"] = 1 - (df["Constrained Local Pax"] / df["Constrained Segment Pax"])
     df["Connect Share"] = df["Connect Share"].clip(lower=0, upper=1)
@@ -146,7 +144,11 @@ with route_tab:
             merged["Change (pp)"] = merged["SLA Adj RASM (mi)_comp"] - merged["SLA Adj RASM (mi)_base"]
 
             st.dataframe(
-                merged.sort_values("Change (pp)", ascending=False).style.format({
+                merged[["RouteID", "Change (pp)"]].loc[merged["RouteID"].isin(new_routes.union(cut_routes).union(continued_routes))].sort_values("Change (pp)", ascending=False).style.format({
+                    "Change (pp)": "{:.2f}"
+                }),", ascending=False).style.format({
+                    "Change (pp)": "{:.2f}"
+                }).style.format({
                     "SLA Adj RASM (mi)_base": "{:.2f}",
                     "SLA Adj RASM (mi)_comp": "{:.2f}",
                     "Change (pp)": "{:.2f}"
@@ -162,6 +164,7 @@ with route_tab:
 
 with validation_tab:
     st.header("ASG vs Spirit Validation")
+    comparison_data = {
     comparison_data = {
         "Market": [
             "PHL", "BWI", "ORD", "TPA", "ATL", "BNA", "MKE", "SAN", "SJC",
@@ -197,4 +200,11 @@ with validation_tab:
         ]
     }
     asg_df = pd.DataFrame(comparison_data)
+    
+    asg_df = pd.DataFrame(comparison_data)
     st.dataframe(asg_df)
+
+    # Agreement check
+    agreed = asg_df["Margin (variable)"].apply(lambda x: isinstance(x, (int, float)))
+    if agreed.all():
+        st.success("✅ All numerical values present and valid.")
