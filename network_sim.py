@@ -26,10 +26,10 @@ def load_data():
     df["Distance (mi)"] = pd.to_numeric(df.get("Distance (mi)"), errors="coerce")
     df["Distance (km)"] = pd.to_numeric(df.get("Distance (km)"), errors="coerce")
     df["Seats"] = pd.to_numeric(df["Seats"], errors="coerce")
-    df["ASM (000s)"] = pd.to_numeric(df["ASM (000s)"], errors="coerce") / 1000
+    df["ASM (000s)"] = pd.to_numeric(df.get("ASM (000s)"), errors="coerce") / 1000
     df["Constrained Yield (cent, km)"] = pd.to_numeric(df["Constrained Yield (cent, km)"], errors="coerce")
     df["Constrained RASK (cent)"] = pd.to_numeric(df["Constrained RASK (cent)"], errors="coerce")
-    df["Load Factor"] = df["Load Factor"].astype(str).str.replace("%", "", regex=False).astype(float)
+    df["Load Factor"] = pd.to_numeric(df["Load Factor"].astype(str).str.replace("%", "", regex=False), errors="coerce")
     df["Constrained Connect Fare"] = pd.to_numeric(df["Constrained Connect Fare"], errors="coerce")
     df["Constrained Segment Pax"] = pd.to_numeric(df["Constrained Segment Pax"], errors="coerce")
     df["Constrained Local Fare"] = pd.to_numeric(df["Constrained Local Fare"], errors="coerce")
@@ -56,7 +56,7 @@ def load_data():
 
     df["Usefulness Score"] = 1000 * (
         df["SLA Adj RASM (mi)"] *
-        (df["Load Factor"] / 100) *
+        df["Load Factor"] *
         (1 - df["Spill Rate"]) *
         (1 - df["Connect Share"])
     )
@@ -68,6 +68,7 @@ def load_data():
 
 df_raw = load_data()
 
+# Tabs
 route_tab, validation_tab = st.tabs(["Scenario Comparison", "ASG vs Spirit Validation"])
 
 with route_tab:
@@ -106,7 +107,7 @@ with route_tab:
             st.markdown(f"### 🟢 **New Routes in `{clean_comp}` (vs `{clean_base}`)**")
             st.dataframe(
                 df_comp[df_comp["RouteID"].isin(new_routes)][[
-                    "RouteID", "ASM (000s)", "SLA Adj Yield (mi)", "SLA Adj RASM (mi)", "Load Factor", "Distance (mi)", "Usefulness Score"
+                    "RouteID", "Flight Number", "ASM (000s)", "SLA Adj Yield (mi)", "SLA Adj RASM (mi)", "Load Factor", "Distance (mi)", "Usefulness Score"
                 ]].drop_duplicates(subset=["RouteID", "Flight Number"]).style.format({
                     "ASM (000s)": "{:.2f}",
                     "SLA Adj Yield (mi)": "{:.2f}",
@@ -121,7 +122,7 @@ with route_tab:
             st.markdown(f"### 🔴 **Cut Routes (were in `{clean_base}`, not in `{clean_comp}`)**")
             st.dataframe(
                 df_base[df_base["RouteID"].isin(cut_routes)][[
-                    "RouteID", "ASM (000s)", "SLA Adj Yield (mi)", "SLA Adj RASM (mi)", "Load Factor", "Distance (mi)", "Usefulness Score"
+                    "RouteID", "Flight Number", "ASM (000s)", "SLA Adj Yield (mi)", "SLA Adj RASM (mi)", "Load Factor", "Distance (mi)", "Usefulness Score"
                 ]].drop_duplicates(subset=["RouteID", "Flight Number"]).style.format({
                     "ASM (000s)": "{:.2f}",
                     "SLA Adj Yield (mi)": "{:.2f}",
