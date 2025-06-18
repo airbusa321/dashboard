@@ -4,28 +4,29 @@ import numpy as np
 
 st.set_page_config(page_title="Route Comparison Dashboard", layout="wide")
 st.title("✈️ Route Comparison: Scenario Insights")
-st.caption("*All values in miles (thousands). SLA adjustment via ln(stage length in km). Usefulness scaled ×1000. ASMs in thousands.")
+st.caption("*All values in miles (thousands). SLA adjustment uses stage length in km → yield/RASK adjusted → then converted to miles. Usefulness scaled ×1000. ASMs in thousands.")
 
 HUBS = ["DTW", "LAS", "FLL", "MCO", "MSY", "MYR", "ACY", "LGA"]
 KM_TO_MI = 0.621371
-MI_TO_KM = 1.60934
 
 @st.cache_data
+
 def load_data():
     df = pd.read_excel("root_routes.xlsx")
     df.columns = [str(c).strip() for c in df.columns]
 
     df.rename(columns={
-        "Flight Number": "AF",
+        "Flight Number": "Flight Number",
         "Departure Day": "Day of Week",
-        "Dist mi": "Distance (mi)"
+        "Dist mi": "Distance (mi)",
+        "Distance (km)": "Distance (km)"
     }, inplace=True)
 
     df["Hub (nested)"] = df["Hub (nested)"].astype(str).str.strip()
     df["Hub"] = df["Hub (nested)"].apply(lambda h: h if h in HUBS else "P2P")
 
     df["Distance (mi)"] = pd.to_numeric(df.get("Distance (mi)"), errors="coerce")
-    df["Distance (km)"] = df["Distance (mi)"] * MI_TO_KM
+    df["Distance (km)"] = pd.to_numeric(df.get("Distance (km)"), errors="coerce")
     df["Seats"] = pd.to_numeric(df.get("Seats", 1), errors="coerce")
     df["ASM"] = pd.to_numeric(df.get("ASM", df["Seats"] * df["Distance (mi)"]), errors="coerce") / 1000  # ASM in thousands
     df["Constrained Yield (cent, km)"] = pd.to_numeric(df.get("Constrained Yield (cent, km)"), errors="coerce")
@@ -38,19 +39,13 @@ def load_data():
     df["Spill Rate"] = pd.to_numeric(df.get("Spill Rate"), errors="coerce")
 
     df["RouteID"] = df["Departure Airport"].astype(str) + ":" + df["Arrival Airport"].astype(str)
-
-    df["Day of Week"] = pd.to_numeric(df["Day of Week"], errors="coerce")
-    days_op = df.groupby(["ScenarioLabel", "RouteID"])["Day of Week"].nunique().clip(upper=7).reset_index()
-    days_op.columns = ["ScenarioLabel", "RouteID", "Days Operated"]
-    df = df.merge(days_op, on=["ScenarioLabel", "RouteID"], how="left")
-    df["Low Frequency"] = df["Days Operated"] <= 2
+    df["Flight Number"] = df["Flight Number"].astype(str).str.strip()
+    df["UniqueID"] = df["ScenarioLabel"] + "_" + df["RouteID"] + "_" + df["Flight Number"]
 
     df = df[~((df["Constrained Yield (cent, km)"] == 0) & (df["Constrained RASK (cent)"] == 0))]
 
-    # SLA Adjustments
-    df["Stage Length (km)"] = df["Distance (km)"].clip(lower=1)
-    df["SLA Adj Yield (mi)"] = (df["Constrained Yield (cent, km)"] * KM_TO_MI * 10) / np.log(df["Stage Length (km)"])
-    df["SLA Adj RASM (mi)"] = (df["Constrained RASK (cent)"]) / np.log(df["Stage Length (km)"])
+    df["SLA Adj Yield (mi)"] = (df["Constrained Yield (cent, km)"]) / np.log(df["Distance (km)"].clip(lower=1)) * KM_TO_MI * 10
+    df["SLA Adj RASM (mi)"] = (df["Constrained RASK (cent)"]) / np.log(df["Distance (km)"].clip(lower=1)) * KM_TO_MI
 
     df["Connect Share"] = 1 - (df["Constrained Local Pax"] / df["Constrained Segment Pax"])
     df["Connect Share"] = df["Connect Share"].clip(lower=0, upper=1)
@@ -65,7 +60,7 @@ def load_data():
     df["Connect Yield"] = df["Constrained Connect Fare"] / df["Constrained Segment Pax"]
     df["Connect vs O-D Yield Ratio"] = 100 * (df["Connect Yield"] / df["Constrained Local Fare"])
 
-    return df
+    return df.drop_duplicates(subset=["UniqueID"])
 
 df_raw = load_data()
 
@@ -101,32 +96,50 @@ if comparison_scenarios:
         cut_routes = routes_base - routes_comp
         continued_routes = routes_base & routes_comp
 
-        st.markdown(f"### 🟢 New Routes in `{clean_comp}` (vs `{clean_base}`)")
-        st.dataframe(df_comp[df_comp["RouteID"].isin(new_routes)][[
-            "RouteID", "ASM", "SLA Adj Yield (mi)", "SLA Adj RASM (mi)", "Load Factor", "Distance (mi)", "Usefulness Score"
-        ]].style.format({
-            "ASM": "{:.2f}", "SLA Adj Yield (mi)": "{:.2f}", "SLA Adj RASM (mi)": "{:.2f}",
-            "Load Factor": "{:.1f}%", "Distance (mi)": "{:.1f}", "Usefulness Score": "{:.0f}"
-        }), use_container_width=True)
+        st.markdown(f"### 🟢 **New Routes in `{clean_comp}` (vs `{clean_base}`)**")
+        st.dataframe(
+            df_comp[df_comp["RouteID"].isin(new_routes)][[
+                "RouteID", "ASM", "SLA Adj Yield (mi)", "SLA Adj RASM (mi)", "Load Factor", "Distance (mi)", "Usefulness Score"
+            ]].style.format({
+                "ASM": "{:.2f}",
+                "SLA Adj Yield (mi)": "{:.2f}",
+                "SLA Adj RASM (mi)": "{:.2f}",
+                "Load Factor": "{:.1f}%",
+                "Distance (mi)": "{:.1f}",
+                "Usefulness Score": "{:.2f}"
+            }),
+            use_container_width=True
+        )
 
-        st.markdown(f"### 🔴 Cut Routes in `{clean_base}` (not in `{clean_comp}`)")
-        st.dataframe(df_base[df_base["RouteID"].isin(cut_routes)][[
-            "RouteID", "ASM", "SLA Adj Yield (mi)", "SLA Adj RASM (mi)", "Load Factor", "Distance (mi)", "Usefulness Score"
-        ]].style.format({
-            "ASM": "{:.2f}", "SLA Adj Yield (mi)": "{:.2f}", "SLA Adj RASM (mi)": "{:.2f}",
-            "Load Factor": "{:.1f}%", "Distance (mi)": "{:.1f}", "Usefulness Score": "{:.0f}"
-        }), use_container_width=True)
+        st.markdown(f"### 🔴 **Cut Routes (were in `{clean_base}`, not in `{clean_comp}`)**")
+        st.dataframe(
+            df_base[df_base["RouteID"].isin(cut_routes)][[
+                "RouteID", "ASM", "SLA Adj Yield (mi)", "SLA Adj RASM (mi)", "Load Factor", "Distance (mi)", "Usefulness Score"
+            ]].style.format({
+                "ASM": "{:.2f}",
+                "SLA Adj Yield (mi)": "{:.2f}",
+                "SLA Adj RASM (mi)": "{:.2f}",
+                "Load Factor": "{:.1f}%",
+                "Distance (mi)": "{:.1f}",
+                "Usefulness Score": "{:.2f}"
+            }),
+            use_container_width=True
+        )
 
-        st.markdown(f"### 📉 Market SLA RASM Delta (`{clean_comp}` vs `{clean_base}`)")
+        st.markdown(f"### 📉 **Market SLA RASM Delta (`{clean_comp}` vs `{clean_base}`)**")
         merged = df_base[df_base["RouteID"].isin(continued_routes)][["RouteID", "SLA Adj RASM (mi)"]].merge(
             df_comp[["RouteID", "SLA Adj RASM (mi)"]], on="RouteID", suffixes=("_base", "_comp")
         )
         merged["Change (pp)"] = merged["SLA Adj RASM (mi)_comp"] - merged["SLA Adj RASM (mi)_base"]
-        st.dataframe(merged.sort_values("Change (pp)", ascending=False).style.format({
-            "SLA Adj RASM (mi)_base": "{:.2f}",
-            "SLA Adj RASM (mi)_comp": "{:.2f}",
-            "Change (pp)": "{:.2f}"
-        }), use_container_width=True)
+
+        st.dataframe(
+            merged.sort_values("Change (pp)", ascending=False).style.format({
+                "SLA Adj RASM (mi)_base": "{:.2f}",
+                "SLA Adj RASM (mi)_comp": "{:.2f}",
+                "Change (pp)": "{:.2f}"
+            }),
+            use_container_width=True
+        )
 else:
     st.info("Select at least one comparison scenario to begin analysis.")
 
